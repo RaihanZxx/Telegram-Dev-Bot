@@ -12,6 +12,7 @@ from handlers.command_handlers import (
     start_command,
     help_command,
     clear_command,
+    clear_db_command,
     mirror_command,
     music_command
 )
@@ -59,6 +60,8 @@ def main():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("clear", clear_command))
+    application.add_handler(CommandHandler("clear_db", clear_db_command))
+    application.add_handler(MessageHandler(filters.Regex(r"^/clear-db(?:@\w+)?$"), clear_db_command))
     application.add_handler(CommandHandler("mirror", mirror_command))
     application.add_handler(CommandHandler("music", music_command))
     

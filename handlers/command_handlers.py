@@ -60,7 +60,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/clear - Hapus history percakapan grup\n\n"
         "<b>File Management:</b>\n"
         "/mirror &lt;url&gt; - Download file dari URL\n"
-        "/music &lt;url&gt; - Download audio dari tautan YouTube\n\n"
+        "/music &lt;url&gt; - Download audio dari tautan YouTube\n"
+        "/clear_db - Bersihkan file sementara download (alias: /clear-db)\n\n"
         "<b>Tips:</b>\n"
         "• Mention bot atau reply pesannya untuk bertanya\n"
         "• Bot memiliki memori percakapan selama 30 menit\n"
@@ -93,6 +94,50 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🗑️ History percakapan telah dihapus!"
     )
     logger.info(f"Clear command from group {group_id}")
+
+
+async def clear_db_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /clear_db command - cleanup temp files"""
+    if not await group_only_filter(update, context):
+        return
+
+    message = update.message
+    chat = update.effective_chat
+    if message is None or chat is None:
+        logger.warning("Clear DB command without message or chat context")
+        return
+
+    status_message = await message.reply_text("🧹 Membersihkan folder sementara...")
+
+    files_removed, dirs_removed, errors = await asyncio.to_thread(file_service.cleanup_temp_directory)
+
+    parts = []
+    if files_removed:
+        parts.append(f"{files_removed} file")
+    if dirs_removed:
+        parts.append(f"{dirs_removed} folder")
+    summary = ", ".join(parts) if parts else "Tidak ada berkas yang perlu dibersihkan"
+
+    if errors:
+        response = (
+            "⚠️ Pembersihan selesai dengan beberapa kegagalan.\n"
+            f"🧹 Dibersihkan: {summary}\n"
+            f"❗️ Gagal dihapus: {errors} item."
+        )
+    else:
+        response = (
+            "✅ Folder sementara berhasil dibersihkan!\n"
+            f"🧹 Dibersihkan: {summary}"
+        )
+
+    await status_message.edit_text(response)
+    logger.info(
+        "Clear DB command executed in group %s (files: %s, dirs: %s, errors: %s)",
+        chat.id,
+        files_removed,
+        dirs_removed,
+        errors,
+    )
 
 
 async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

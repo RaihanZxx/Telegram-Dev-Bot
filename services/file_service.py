@@ -1,6 +1,7 @@
 """File service for downloading and handling files"""
 import asyncio
 import os
+import shutil
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
@@ -167,6 +168,34 @@ class FileService:
                 logger.info(f"Cleaned up temp file: {file_path}")
         except Exception as e:
             logger.error(f"Error cleaning up file {file_path}: {e}")
+
+    def cleanup_temp_directory(self) -> Tuple[int, int, int]:
+        """Remove all files and directories inside the temp directory."""
+        files_removed = 0
+        dirs_removed = 0
+        errors = 0
+
+        if not os.path.exists(self.temp_dir):
+            return files_removed, dirs_removed, errors
+
+        try:
+            for entry in os.scandir(self.temp_dir):
+                path = entry.path
+                try:
+                    if entry.is_symlink() or entry.is_file():
+                        os.unlink(path)
+                        files_removed += 1
+                    elif entry.is_dir():
+                        shutil.rmtree(path)
+                        dirs_removed += 1
+                except Exception as cleanup_error:
+                    errors += 1
+                    logger.error(f"Failed to remove {path}: {cleanup_error}", exc_info=True)
+        except Exception as scan_error:
+            errors += 1
+            logger.error(f"Failed to scan temp directory {self.temp_dir}: {scan_error}", exc_info=True)
+
+        return files_removed, dirs_removed, errors
 
 # Global file service instance
 file_service = FileService()
