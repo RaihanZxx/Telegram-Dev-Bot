@@ -2,6 +2,7 @@
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
+from telegram.error import BadRequest
 from middleware.group_filter import group_only_filter
 from middleware.context_manager import context_manager
 from services.ai_service import ai_service
@@ -89,12 +90,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         formatted_response = format_telegram_markdown(cleaned_response)
         
         # Send response
-        await context.bot.edit_message_text(
-            chat_id=chat.id,
-            message_id=thinking_message.message_id,
-            text=formatted_response,
-            parse_mode=ParseMode.MARKDOWN_V2
-        )
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat.id,
+                message_id=thinking_message.message_id,
+                text=formatted_response,
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+        except BadRequest as markdown_error:
+            logger.warning(
+                "Markdown parsing failed, falling back to plain text: %s",
+                markdown_error
+            )
+            await context.bot.edit_message_text(
+                chat_id=chat.id,
+                message_id=thinking_message.message_id,
+                text=cleaned_response,
+                parse_mode=None
+            )
         
         # Update conversation context
         context_manager.add_message(group_id, "user", user_message)
