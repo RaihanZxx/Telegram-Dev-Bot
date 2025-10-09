@@ -2,6 +2,7 @@
 import asyncio
 import os
 import shutil
+import tempfile
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
@@ -20,7 +21,7 @@ class FileService:
         self.max_size = MAX_FILE_SIZE
         self.timeout = DOWNLOAD_TIMEOUT
         self.ffmpeg_available = shutil.which("ffmpeg") is not None
-        self.cookie_file = (
+        self.cookie_file_path = (
             YT_COOKIES_FILE if YT_COOKIES_FILE and os.path.exists(YT_COOKIES_FILE) else None
         )
         
@@ -98,7 +99,22 @@ class FileService:
 
         normalized_url = _normalize_url(url)
 
-        def _download() -> Tuple[Any, Optional[str]]:
+        def _prepare_cookie_file() -> Optional[str]:
+            if not self.cookie_file_path:
+                return None
+            try:
+                with open(self.cookie_file_path, 'rb') as src:
+                    temp_file = tempfile.NamedTemporaryFile(
+                        dir=self.temp_dir, suffix=".cookies", delete=False
+                    )
+                    with temp_file:
+                        shutil.copyfileobj(src, temp_file)
+                    return temp_file.name
+            except Exception as cookie_error:
+                logger.error("Failed to prepare cookie file: %s", cookie_error, exc_info=True)
+                return None
+
+        def _download(cookiefile: Optional[str]) -> Tuple[Any, Optional[str]]:
             ydl_opts: Any = {
                 "format": "bestaudio[ext=m4a]/bestaudio/best",
                 "outtmpl": os.path.join(self.temp_dir, "%(title)s.%(ext)s"),
@@ -121,8 +137,8 @@ class FileService:
             else:
                 ydl_opts["prefer_ffmpeg"] = False
 
-            if self.cookie_file:
-                ydl_opts["cookiefile"] = self.cookie_file
+            if cookiefile:
+                ydl_opts["cookiefile"] = cookiefile
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info: Any = ydl.extract_info(normalized_url, download=True)
@@ -135,7 +151,12 @@ class FileService:
                 return info, file_path
 
         try:
-            info, local_file_path = await asyncio.to_thread(_download)
+            temp_cookie = _prepare_cookie_file()
+            try:
+                info, local_file_path = await asyncio.to_thread(_download, temp_cookie)
+            finally:
+                if temp_cookie:
+                    self.cleanup_file(temp_cookie)
 
             if not local_file_path or not os.path.exists(local_file_path):
                 logger.error("yt-dlp did not return a valid file path")
