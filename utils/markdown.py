@@ -1,6 +1,7 @@
 """Markdown formatting utilities for Telegram MarkdownV2"""
 import re
 import uuid
+from typing import Match
 from telegram.helpers import escape_markdown
 from utils.logger import setup_logger
 
@@ -90,6 +91,7 @@ def format_telegram_markdown(text: str) -> str:
 
         # Ensure opening code fences start on a new line
         escaped_text = re.sub(r'(?<!\n)```', r'\n```', escaped_text)
+        escaped_text = re.sub(r'```(?!\n)', r'```\n', escaped_text)
 
         return escaped_text
 
