@@ -19,6 +19,7 @@ class FileService:
         self.temp_dir = TEMP_DIR
         self.max_size = MAX_FILE_SIZE
         self.timeout = DOWNLOAD_TIMEOUT
+        self.ffmpeg_available = shutil.which("ffmpeg") is not None
         
         # Ensure temp directory exists
         if not os.path.exists(self.temp_dir):
@@ -96,21 +97,26 @@ class FileService:
 
         def _download() -> Tuple[Any, Optional[str]]:
             ydl_opts: Any = {
-                "format": "bestaudio/best",
+                "format": "bestaudio[ext=m4a]/bestaudio/best",
                 "outtmpl": os.path.join(self.temp_dir, "%(title)s.%(ext)s"),
                 "restrictfilenames": True,
                 "nocheckcertificate": True,
                 "quiet": True,
                 "noprogress": True,
                 "cachedir": False,
-                "postprocessors": [
+                "noplaylist": True,
+            }
+
+            if self.ffmpeg_available:
+                ydl_opts["postprocessors"] = [
                     {
                         "key": "FFmpegExtractAudio",
                         "preferredcodec": "mp3",
                         "preferredquality": "192",
                     }
-                ],
-            }
+                ]
+            else:
+                ydl_opts["prefer_ffmpeg"] = False
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info: Any = ydl.extract_info(normalized_url, download=True)
@@ -148,6 +154,11 @@ class FileService:
             logger.error(f"yt-dlp download error: {e}")
             if local_file_path:
                 self.cleanup_file(local_file_path)
+
+            error_message = str(e).lower()
+            if "confirm your age" in error_message or "age" in error_message:
+                return False, "❌ Gagal mengunduh audio: Video dibatasi usia dan memerlukan akun yang masuk.", None, None
+
             return False, "❌ Gagal mengunduh audio: URL tidak valid atau konten tidak tersedia.", None, None
         except Exception as e:
             logger.error(f"Unexpected error during audio download: {e}", exc_info=True)
