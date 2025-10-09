@@ -1,6 +1,7 @@
 """AI service for handling AI model interactions"""
+from typing import Dict, List, Optional, cast
+
 import httpx
-from typing import Optional, List, Dict
 from config.settings import (
     BYTEZ_API_KEY,
     BYTEZ_API_URL,
@@ -18,8 +19,8 @@ class AIService:
     """Service for interacting with AI models"""
     
     def __init__(self):
-        self.api_key = BYTEZ_API_KEY
-        self.api_url = BYTEZ_API_URL
+        self.api_key = cast(str, BYTEZ_API_KEY)
+        self.api_url = cast(str, BYTEZ_API_URL)
         self.timeout = BYTEZ_TIMEOUT
     
     async def get_response(
@@ -53,12 +54,14 @@ class AIService:
                 # Add current user message
                 messages.append({"role": "user", "content": user_message})
                 
+                headers: Dict[str, str] = {
+                    "Authorization": self.api_key,
+                    "Content-Type": "application/json"
+                }
+
                 response = await client.post(
                     url=self.api_url,
-                    headers={
-                        "Authorization": self.api_key,
-                        "Content-Type": "application/json"
-                    },
+                    headers=headers,
                     json={
                         "messages": messages,
                         "stream": False,

@@ -2,6 +2,7 @@
 import time
 
 from telegram import Update
+from telegram.error import TimedOut
 from telegram.ext import ContextTypes
 from middleware.group_filter import group_only_filter
 from middleware.context_manager import context_manager
@@ -14,7 +15,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
     if not await group_only_filter(update, context):
         return
-    
+
+    message = update.message
+    chat = update.effective_chat
+    if message is None or chat is None:
+        logger.warning("Start command without message or chat context")
+        return
+
     welcome_message = (
         "👋 <b>Halo! Saya Bot Asisten Developer</b>\n\n"
         "Saya siap membantu Anda dengan:\n"
@@ -25,11 +32,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Gunakan /help untuk melihat semua command yang tersedia."
     )
     
-    await update.message.reply_text(
+    await message.reply_text(
         welcome_message,
         parse_mode="HTML"
     )
-    logger.info(f"Start command from group {update.effective_chat.id}")
+    logger.info(f"Start command from group {chat.id}")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -37,6 +44,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await group_only_filter(update, context):
         return
     
+    message = update.message
+    chat = update.effective_chat
+    if message is None or chat is None:
+        logger.warning("Help command without message or chat context")
+        return
+
     help_message = (
         "📖 <b>Daftar Command</b>\n\n"
         "<b>Umum:</b>\n"
@@ -53,11 +66,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Rate limit: 10 pesan per menit per user"
     )
     
-    await update.message.reply_text(
+    await message.reply_text(
         help_message,
         parse_mode="HTML"
     )
-    logger.info(f"Help command from group {update.effective_chat.id}")
+    logger.info(f"Help command from group {chat.id}")
 
 
 async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -65,10 +78,16 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await group_only_filter(update, context):
         return
     
-    group_id = update.effective_chat.id
+    message = update.message
+    chat = update.effective_chat
+    if message is None or chat is None:
+        logger.warning("Clear command without message or chat context")
+        return
+
+    group_id = chat.id
     context_manager.clear_context(group_id)
     
-    await update.message.reply_text(
+    await message.reply_text(
         "🗑️ History percakapan telah dihapus!"
     )
     logger.info(f"Clear command from group {group_id}")
@@ -79,8 +98,14 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await group_only_filter(update, context):
         return
     
+    message = update.message
+    chat = update.effective_chat
+    if message is None or chat is None:
+        logger.warning("Mirror command without message or chat context")
+        return
+
     if not context.args:
-        await update.message.reply_text(
+        await message.reply_text(
             "❌ Tolong berikan URL file.\n"
             "Contoh: <code>/mirror https://example.com/file.zip</code>",
             parse_mode="HTML"
@@ -88,10 +113,11 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     url = context.args[0]
-    status_message = await update.message.reply_text("🔗 Memulai download...")
+    status_message = await message.reply_text("🔗 Memulai download...")
     local_file_path = None
     download_duration = None
     upload_duration = None
+    upload_start = None
     
     try:
         # Extract filename for display
@@ -101,12 +127,16 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Download file
         download_start = time.monotonic()
-        success, message, local_file_path = await file_service.download_file(url)
+        success, status_text, local_file_path = await file_service.download_file(url)
         download_duration = time.monotonic() - download_start
         
         if not success:
             extra = f"\n⏱️ Download: {download_duration:.2f}s" if download_duration is not None else ""
-            await status_message.edit_text(f"{message}{extra}")
+            await status_message.edit_text(f"{status_text}{extra}")
+            return
+        
+        if local_file_path is None:
+            await status_message.edit_text("❌ File tidak tersedia setelah diunduh.")
             return
         
         # Upload to Telegram
@@ -114,7 +144,11 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         upload_start = time.monotonic()
         with open(local_file_path, 'rb') as f:
-            await update.message.reply_document(document=f)
+            await message.reply_document(
+                document=f,
+                read_timeout=600,
+                write_timeout=600
+            )
         upload_duration = time.monotonic() - upload_start
         
         await status_message.edit_text(
@@ -123,7 +157,23 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⏱️ Download: {download_duration:.2f}s\n"
             f"📤 Unggah: {upload_duration:.2f}s"
         )
-        logger.info(f"Mirror successful for {filename} in group {update.effective_chat.id}")
+        logger.info(f"Mirror successful for {filename} in group {chat.id}")
+        
+    except TimedOut as e:
+        logger.error(f"Upload timed out for mirror command: {e}", exc_info=True)
+        if upload_start is not None:
+            upload_duration = time.monotonic() - upload_start
+        extra_parts = []
+        if download_duration is not None:
+            extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
+        if upload_duration is not None:
+            extra_parts.append(f"📤 Unggah: {upload_duration:.2f}s")
+        extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
+        await status_message.edit_text(
+            "❌ Terjadi kesalahan: Pengunggahan ke Telegram melebihi batas waktu."
+            " Mohon coba lagi dalam beberapa saat." + extras
+        )
+        return
         
     except Exception as e:
         logger.error(f"Error in mirror command: {e}", exc_info=True)
@@ -146,8 +196,14 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await group_only_filter(update, context):
         return
 
+    message = update.message
+    chat = update.effective_chat
+    if message is None or chat is None:
+        logger.warning("Music command without message or chat context")
+        return
+
     if not context.args:
-        await update.message.reply_text(
+        await message.reply_text(
             "❌ Tolong berikan URL musik.\n"
             "Contoh: <code>/music https://music.youtube.com/watch?v=hsfa1RSk0pA</code>",
             parse_mode="HTML"
@@ -155,7 +211,7 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     url = context.args[0]
-    status_message = await update.message.reply_text("🎵 Memproses tautan musik...")
+    status_message = await message.reply_text("🎵 Memproses tautan musik...")
     local_file_path = None
     download_duration = None
     upload_duration = None
@@ -165,12 +221,16 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_message.edit_text("📥 Mengunduh audio...")
 
         download_start = time.monotonic()
-        success, message, local_file_path, metadata = await file_service.download_audio(url)
+        success, info_message, local_file_path, metadata = await file_service.download_audio(url)
         download_duration = time.monotonic() - download_start
 
         if not success:
             extra = f"\n⏱️ Download: {download_duration:.2f}s" if download_duration is not None else ""
-            await status_message.edit_text(f"{message}{extra}")
+            await status_message.edit_text(f"{info_message}{extra}")
+            return
+        
+        if local_file_path is None:
+            await status_message.edit_text("❌ File audio tidak tersedia setelah diunduh.")
             return
 
         await status_message.edit_text("📤 Mengunggah audio...")
@@ -188,17 +248,17 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         upload_start = time.monotonic()
         with open(local_file_path, 'rb') as f:
-            await update.message.reply_audio(audio=f, **kwargs)
+            await message.reply_audio(audio=f, **kwargs)
         upload_duration = time.monotonic() - upload_start
 
-        display_name = title or (local_file_path.split('/')[-1] if local_file_path else "audio")
+        display_name = title or local_file_path.split('/')[-1]
         await status_message.edit_text(
             "✅ Musik berhasil dikirim!\n"
             f"🎶 {display_name}\n"
             f"⏱️ Download: {download_duration:.2f}s\n"
             f"📤 Unggah: {upload_duration:.2f}s"
         )
-        logger.info(f"Music command successful for {display_name} in group {update.effective_chat.id}")
+        logger.info(f"Music command successful for {display_name} in group {chat.id}")
 
     except Exception as e:
         logger.error(f"Error in music command: {e}", exc_info=True)

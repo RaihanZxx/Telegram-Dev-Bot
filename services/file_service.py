@@ -1,7 +1,7 @@
 """File service for downloading and handling files"""
 import asyncio
 import os
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 import yt_dlp
@@ -86,8 +86,8 @@ class FileService:
         local_file_path: Optional[str] = None
         metadata: Optional[Dict[str, Optional[str]]] = None
 
-        def _download() -> Tuple[Dict, Optional[str]]:
-            ydl_opts = {
+        def _download() -> Tuple[Any, Optional[str]]:
+            ydl_opts: Any = {
                 "format": "bestaudio/best",
                 "outtmpl": os.path.join(self.temp_dir, "%(title)s.%(ext)s"),
                 "restrictfilenames": True,
@@ -105,8 +105,8 @@ class FileService:
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                file_path = None
+                info: Any = ydl.extract_info(url, download=True)
+                file_path: Optional[str] = None
                 requested = info.get("requested_downloads") or []
                 if requested:
                     file_path = requested[0].get("filepath")
@@ -129,8 +129,8 @@ class FileService:
                 return False, "❌ File audio terlalu besar (> 1 GB).", None, None
 
             metadata = {
-                "title": info.get("title"),
-                "duration": str(info.get("duration")) if info.get("duration") else None,
+                "title": info.get("title") if isinstance(info.get("title"), str) else None,
+                "duration": str(info.get("duration")) if info.get("duration") is not None else None,
             }
 
             display_name = metadata.get("title") or os.path.basename(local_file_path)

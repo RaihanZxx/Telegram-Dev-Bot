@@ -22,28 +22,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check if in group
     if not await group_only_filter(update, context):
         return
-    
-    # Guard clause
-    if not update.message or not update.message.text:
-        return
-    
-    # Check if bot should respond
-    bot_username = context.bot.username
+
     message = update.message
-    
-    # Respond if: mentioned, replied to, or starts with bot name
-    should_respond = (
-        message.reply_to_message and 
-        message.reply_to_message.from_user.id == context.bot.id
-    ) or (
-        bot_username and f"@{bot_username}" in message.text
-    )
+    chat = update.effective_chat
+    user = update.effective_user
+
+    if message is None or chat is None or user is None:
+        logger.warning("Message handler received incomplete update context")
+        return
+
+    if message.text is None:
+        return
+
+    bot_username = context.bot.username
+
+    should_respond = False
+    if message.reply_to_message and message.reply_to_message.from_user:
+        should_respond = message.reply_to_message.from_user.id == context.bot.id
+
+    if not should_respond and bot_username:
+        should_respond = f"@{bot_username}" in message.text
     
     if not should_respond:
         return
-    
-    user_id = update.effective_user.id
-    group_id = update.effective_chat.id
+
+    user_id = user.id
+    group_id = chat.id
     user_message = message.text
     
     # Remove bot mention from message
@@ -86,7 +90,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Send response
         await context.bot.edit_message_text(
-            chat_id=update.effective_chat.id,
+            chat_id=chat.id,
             message_id=thinking_message.message_id,
             text=formatted_response,
             parse_mode=ParseMode.MARKDOWN_V2
@@ -104,7 +108,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Try to send error message
         try:
             await context.bot.edit_message_text(
-                chat_id=update.effective_chat.id,
+                chat_id=chat.id,
                 message_id=thinking_message.message_id,
                 text="❌ Maaf, terjadi gangguan teknis. Coba lagi nanti."
             )

@@ -24,13 +24,15 @@ async def group_only_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return False
     
     chat = update.effective_chat
+    user = update.effective_user
     
     # Allow only groups and supergroups
     is_group = chat.type in [Chat.GROUP, Chat.SUPERGROUP]
     
     if not is_group:
+        user_id = user.id if user else "unknown"
         logger.warning(
-            f"Blocked private chat attempt from user {update.effective_user.id}"
+            f"Blocked private chat attempt from user {user_id}"
         )
         # Send message to user explaining bot only works in groups
         if update.message:
