@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: telegram-dev-bot
+    name: Telegram-Dev-Bot
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt

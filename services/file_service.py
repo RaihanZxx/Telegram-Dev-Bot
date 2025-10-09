@@ -161,6 +161,9 @@ class FileService:
             if "confirm your age" in error_message or "age" in error_message:
                 return False, "❌ Gagal mengunduh audio: Video dibatasi usia dan memerlukan akun yang masuk.", None, None
 
+            detail = str(e).strip()
+            if detail:
+                return False, f"❌ Gagal mengunduh audio: {detail}", None, None
             return False, "❌ Gagal mengunduh audio: URL tidak valid atau konten tidak tersedia.", None, None
         except Exception as e:
             logger.error(f"Unexpected error during audio download: {e}", exc_info=True)

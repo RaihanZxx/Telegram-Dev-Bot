@@ -329,7 +329,12 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         upload_start = time.monotonic()
         with open(local_file_path, 'rb') as f:
-            await message.reply_audio(audio=f, **kwargs)
+            await message.reply_audio(
+                audio=f,
+                read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                **kwargs,
+            )
         upload_duration = time.monotonic() - upload_start
 
         display_name = title or local_file_path.split('/')[-1]
