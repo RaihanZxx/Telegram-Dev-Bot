@@ -14,7 +14,7 @@ BYTEZ_API_KEY = os.getenv("BYTEZ_API_KEY")
 if not BYTEZ_API_KEY:
     raise ValueError("BYTEZ_API_KEY is required in .env file")
 
-BYTEZ_API_URL = "https://api.bytez.com/models/v2/Qwen/Qwen2.5-Coder-7B"
+BYTEZ_API_URL = "https://api.bytez.com/models/v2/Qwen/Qwen3Guard-Gen-8B"
 BYTEZ_TIMEOUT = 300.0  # 5 minutes
 
 BYTEZ_IMAGE_MODEL_URL = "https://api.bytez.com/models/v2/stabilityai/stable-diffusion-xl-base-1.0"
