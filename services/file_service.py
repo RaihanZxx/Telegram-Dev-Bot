@@ -61,7 +61,7 @@ class FileService:
             
             if file_size > self.max_size:
                 self.cleanup_file(local_file_path)
-                return False, f"❌ File `{filename}` terlalu besar (> 1 GB).", None
+                return False, f"❌ File `{filename}` terlalu besar (> 2 GB).", None
             
             return True, f"✅ File `{filename}` berhasil diunduh.", local_file_path
             
@@ -126,7 +126,7 @@ class FileService:
 
             if file_size > self.max_size:
                 self.cleanup_file(local_file_path)
-                return False, "❌ File audio terlalu besar (> 1 GB).", None, None
+                return False, "❌ File audio terlalu besar (> 2 GB).", None, None
 
             metadata = {
                 "title": info.get("title") if isinstance(info.get("title"), str) else None,

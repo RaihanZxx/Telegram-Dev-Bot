@@ -1,8 +1,10 @@
 """Command handlers for the bot"""
+import asyncio
 import time
 
 from telegram import Update
-from telegram.error import TimedOut
+from telegram.error import TimedOut, TelegramError
+from config.settings import TELEGRAM_UPLOAD_TIMEOUT
 from telegram.ext import ContextTypes
 from middleware.group_filter import group_only_filter
 from middleware.context_manager import context_manager
@@ -62,7 +64,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Tips:</b>\n"
         "• Mention bot atau reply pesannya untuk bertanya\n"
         "• Bot memiliki memori percakapan selama 30 menit\n"
-        "• Maximum file size untuk download: 1 GB\n"
+        "• Maximum file size untuk download: 2 GB\n"
         "• Rate limit: 10 pesan per menit per user"
     )
     
@@ -146,17 +148,23 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(local_file_path, 'rb') as f:
             await message.reply_document(
                 document=f,
-                read_timeout=600,
-                write_timeout=600
+                read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                write_timeout=TELEGRAM_UPLOAD_TIMEOUT
             )
         upload_duration = time.monotonic() - upload_start
         
-        await status_message.edit_text(
+        success_text = (
             "✅ Selesai!\n"
             f"📄 {filename}\n"
             f"⏱️ Download: {download_duration:.2f}s\n"
             f"📤 Unggah: {upload_duration:.2f}s"
         )
+        try:
+            await status_message.edit_text(success_text)
+        except (TimedOut, asyncio.TimeoutError) as edit_error:
+            logger.warning(f"Status message update timed out: {edit_error}")
+        except TelegramError as edit_error:
+            logger.warning(f"Status message update failed: {edit_error}")
         logger.info(f"Mirror successful for {filename} in group {chat.id}")
         
     except TimedOut as e:
@@ -169,10 +177,35 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if upload_duration is not None:
             extra_parts.append(f"📤 Unggah: {upload_duration:.2f}s")
         extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
-        await status_message.edit_text(
-            "❌ Terjadi kesalahan: Pengunggahan ke Telegram melebihi batas waktu."
-            " Mohon coba lagi dalam beberapa saat." + extras
-        )
+        try:
+            await status_message.edit_text(
+                "❌ Terjadi kesalahan: Pengunggahan ke Telegram melebihi batas waktu."
+                " Mohon coba lagi dalam beberapa saat." + extras
+            )
+        except (TimedOut, asyncio.TimeoutError) as edit_error:
+            logger.warning(f"Status message update timed out after upload timeout: {edit_error}")
+        except TelegramError as edit_error:
+            logger.warning(f"Status message update failed after upload timeout: {edit_error}")
+        return
+    except asyncio.TimeoutError as e:
+        logger.error(f"Async operation timed out for mirror command: {e}", exc_info=True)
+        if upload_start is not None:
+            upload_duration = time.monotonic() - upload_start
+        extra_parts = []
+        if download_duration is not None:
+            extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
+        if upload_duration is not None:
+            extra_parts.append(f"📤 Unggah: {upload_duration:.2f}s")
+        extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
+        try:
+            await status_message.edit_text(
+                "❌ Terjadi kesalahan: Pengunggahan ke Telegram melebihi batas waktu."
+                " Mohon coba lagi dalam beberapa saat." + extras
+            )
+        except (TimedOut, asyncio.TimeoutError) as edit_error:
+            logger.warning(f"Status message update timed out after async timeout: {edit_error}")
+        except TelegramError as edit_error:
+            logger.warning(f"Status message update failed after async timeout: {edit_error}")
         return
         
     except Exception as e:

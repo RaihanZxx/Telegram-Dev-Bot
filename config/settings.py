@@ -37,8 +37,11 @@ RATE_LIMIT_WINDOW = 60  # seconds
 
 # File Download Configuration
 TEMP_DIR = "/tmp"
-MAX_FILE_SIZE = 1024 * 1024 * 1024  # 1 GB
+MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
 DOWNLOAD_TIMEOUT = 24 * 60 * 60  # 24 hours
+
+# Telegram upload timeout
+TELEGRAM_UPLOAD_TIMEOUT = 24 * 60 * 60  # 24 hours
 
 # Logging Configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
