@@ -9,7 +9,7 @@ logger = setup_logger(__name__)
 
 def _store_segment(store: dict, prefix: str, value: str) -> str:
     """Create a unique placeholder and store the original value."""
-    placeholder = f"{prefix}_{uuid.uuid4().hex}"
+    placeholder = f"{prefix}PLACEHOLDER{uuid.uuid4().hex}"
     store[placeholder] = value
     return placeholder
 
