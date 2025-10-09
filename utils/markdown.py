@@ -28,8 +28,8 @@ def format_telegram_markdown(text: str) -> str:
         Telegram MarkdownV2 compatible text
     """
     try:
-        # Convert markdown headings to bold before processing
-        text = re.sub(r'^\s*#+\s*(.+)$', r'**\1**', text, flags=re.MULTILINE)
+        # Convert markdown headings (with space) to bold before processing
+        text = re.sub(r'^\s*#+\s+(.+)$', r'**\1**', text, flags=re.MULTILINE)
 
         code_blocks: dict[str, str] = {}
         inline_code_blocks: dict[str, str] = {}
@@ -113,8 +113,44 @@ def clean_ai_response(text: str) -> str:
     """
     # Remove thinking tags (for models that expose reasoning)
     text = re.sub(r'<think>.*?</think>\s*', '', text, flags=re.DOTALL | re.IGNORECASE)
-    
+
+    # Trim at known code-insertion markers
+    for marker in (
+        "<|fim_middle|>",
+        "<|fim_suffix|>",
+        "<|fim_prefix|>",
+        "<|fimprefix|>",
+        "<|filesep|>",
+        "<|file_sep|>",
+    ):
+        if marker in text:
+            text = text.split(marker, 1)[0]
+
+    # Remove duplicate language identifiers inside code blocks
+    def _strip_redundant_lang(match: Match[str]) -> str:
+        language = match.group(1)
+        content = match.group(2)
+        lines = content.splitlines()
+
+        # Remove leading empty lines
+        idx = 0
+        while idx < len(lines) and lines[idx].strip() == "":
+            idx += 1
+
+        # Remove first non-empty line if it repeats the language identifier
+        if idx < len(lines) and lines[idx].strip().lower() == language.lower():
+            del lines[idx]
+
+        rebuilt = '\n'.join(lines)
+
+        if content.endswith('\n') and not rebuilt.endswith('\n'):
+            rebuilt += '\n'
+
+        return f"```{language}\n{rebuilt}```"
+
+    text = re.sub(r"```([a-zA-Z0-9_+-]+)\n([\s\S]*?)```", _strip_redundant_lang, text)
+
     # Remove excessive whitespace
     text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
-    
+
     return text.strip()
