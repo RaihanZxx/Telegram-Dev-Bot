@@ -1,14 +1,24 @@
 """Markdown formatting utilities for Telegram MarkdownV2"""
 import re
 import uuid
+from telegram.helpers import escape_markdown
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
+
+def _store_segment(store: dict, prefix: str, value: str) -> str:
+    """Create a unique placeholder and store the original value."""
+    placeholder = f"{prefix}_{uuid.uuid4().hex}"
+    store[placeholder] = value
+    return placeholder
+
+
 def format_telegram_markdown(text: str) -> str:
     """
     Convert generic markdown to Telegram MarkdownV2 format.
-    Handles code blocks and escapes special characters.
+    Handles code blocks and escapes special characters while preserving
+    bold and italic formatting.
     
     Args:
         text: Raw text with markdown formatting
@@ -17,37 +27,73 @@ def format_telegram_markdown(text: str) -> str:
         Telegram MarkdownV2 compatible text
     """
     try:
-        code_blocks = {}
-        
-        # Extract code blocks to protect them from escaping
-        def replace_with_placeholder(match):
-            placeholder = f"PLACEHOLDER{uuid.uuid4().hex}END"
-            code_blocks[placeholder] = match.group(0)
-            return placeholder
-        
-        text_no_code = re.sub(r'```.*?```', replace_with_placeholder, text, flags=re.DOTALL)
-        
-        # Escape special characters (except in code blocks)
-        escape_chars = r'\_*[]()~`>#+=-|{}.!'
-        text_escaped = re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text_no_code)
-        
-        # Convert markdown headings to bold
-        text_formatted = re.sub(r'^\s*#+\s*(.*)', r'*\1*', text_escaped, flags=re.MULTILINE)
-        
-        # Convert **bold** to *bold*
-        text_formatted = re.sub(r'\*\*(.*?)\*\*', r'*\1*', text_formatted)
-        
-        # Restore code blocks
-        final_text = text_formatted
+        # Convert markdown headings to bold before processing
+        text = re.sub(r'^\s*#+\s*(.+)$', r'**\1**', text, flags=re.MULTILINE)
+
+        code_blocks: dict[str, str] = {}
+        inline_code_blocks: dict[str, str] = {}
+        bold_segments: dict[str, str] = {}
+        italic_segments: dict[str, str] = {}
+
+        # Extract code blocks (```code```)
+        text_processed = re.sub(
+            r"```.*?```",
+            lambda match: _store_segment(code_blocks, "CODE", match.group(0)),
+            text,
+            flags=re.DOTALL,
+        )
+
+        # Extract inline code (`code`)
+        text_processed = re.sub(
+            r"`[^`]+`",
+            lambda match: _store_segment(inline_code_blocks, "INLINE", match.group(0)),
+            text_processed,
+        )
+
+        # Extract bold segments (**text** or __text__)
+        bold_pattern = re.compile(r"(\*\*|__)(.+?)\1", re.DOTALL)
+        text_processed = bold_pattern.sub(
+            lambda match: _store_segment(bold_segments, "BOLD", match.group(2)),
+            text_processed,
+        )
+
+        # Extract italic segments (*text* or _text_)
+        italic_star_pattern = re.compile(r"(?<!\*)\*(?!\*)([^*\n]+?)(?<!\*)\*(?!\*)")
+        italic_underscore_pattern = re.compile(r"(?<!_)_(?!_)([^_\n]+?)(?<!_)_(?!_)")
+        text_processed = italic_star_pattern.sub(
+            lambda match: _store_segment(italic_segments, "ITALIC", match.group(1)),
+            text_processed,
+        )
+        text_processed = italic_underscore_pattern.sub(
+            lambda match: _store_segment(italic_segments, "ITALIC", match.group(1)),
+            text_processed,
+        )
+
+        # Escape remaining special characters for MarkdownV2
+        escaped_text = escape_markdown(text_processed, version=2)
+
+        # Restore bold and italic segments with proper escaping
+        for placeholder, content in bold_segments.items():
+            escaped_content = escape_markdown(content, version=2)
+            escaped_text = escaped_text.replace(placeholder, f"*{escaped_content}*")
+
+        for placeholder, content in italic_segments.items():
+            escaped_content = escape_markdown(content, version=2)
+            escaped_text = escaped_text.replace(placeholder, f"_{escaped_content}_")
+
+        # Restore inline code and code blocks
+        for placeholder, original_block in inline_code_blocks.items():
+            escaped_text = escaped_text.replace(placeholder, original_block)
+
         for placeholder, original_block in code_blocks.items():
-            final_text = final_text.replace(placeholder, original_block)
-        
+            escaped_text = escaped_text.replace(placeholder, original_block)
+
         # Ensure code blocks are on separate lines
-        final_text = re.sub(r'(?<!\n)```', r'\n```', final_text)
-        final_text = re.sub(r'```(?!\n)', r'```\n', final_text)
-        
-        return final_text
-    
+        escaped_text = re.sub(r'(?<!\n)```', r'\n```', escaped_text)
+        escaped_text = re.sub(r'```(?!\n)', r'```\n', escaped_text)
+
+        return escaped_text
+
     except Exception as e:
         logger.error(f"Error formatting markdown: {e}", exc_info=True)
         # Fallback: return plain text without markdown
