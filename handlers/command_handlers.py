@@ -1,4 +1,6 @@
 """Command handlers for the bot"""
+import time
+
 from telegram import Update
 from telegram.ext import ContextTypes
 from middleware.group_filter import group_only_filter
@@ -42,11 +44,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help - Tampilkan bantuan ini\n"
         "/clear - Hapus history percakapan grup\n\n"
         "<b>File Management:</b>\n"
-        "/mirror &lt;url&gt; - Download file dari URL\n\n"
+        "/mirror &lt;url&gt; - Download file dari URL\n"
+        "/music &lt;url&gt; - Download audio dari tautan YouTube\n\n"
         "<b>Tips:</b>\n"
         "• Mention bot atau reply pesannya untuk bertanya\n"
         "• Bot memiliki memori percakapan selama 30 menit\n"
-        "• Maximum file size untuk download: 50 MB\n"
+        "• Maximum file size untuk download: 1 GB\n"
         "• Rate limit: 10 pesan per menit per user"
     )
     
@@ -86,6 +89,9 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     url = context.args[0]
     status_message = await update.message.reply_text("🔗 Memulai download...")
+    local_file_path = None
+    download_duration = None
+    upload_duration = None
     
     try:
         # Extract filename for display
@@ -94,26 +100,116 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_message.edit_text(f"📥 Mengunduh `{filename}`...")
         
         # Download file
+        download_start = time.monotonic()
         success, message, local_file_path = await file_service.download_file(url)
+        download_duration = time.monotonic() - download_start
         
         if not success:
-            await status_message.edit_text(message)
+            extra = f"\n⏱️ Download: {download_duration:.2f}s" if download_duration is not None else ""
+            await status_message.edit_text(f"{message}{extra}")
             return
         
         # Upload to Telegram
         await status_message.edit_text(f"📤 Mengunggah `{filename}`...")
         
+        upload_start = time.monotonic()
         with open(local_file_path, 'rb') as f:
             await update.message.reply_document(document=f)
+        upload_duration = time.monotonic() - upload_start
         
-        await status_message.delete()
+        await status_message.edit_text(
+            "✅ Selesai!\n"
+            f"📄 {filename}\n"
+            f"⏱️ Download: {download_duration:.2f}s\n"
+            f"📤 Unggah: {upload_duration:.2f}s"
+        )
         logger.info(f"Mirror successful for {filename} in group {update.effective_chat.id}")
         
     except Exception as e:
         logger.error(f"Error in mirror command: {e}", exc_info=True)
-        await status_message.edit_text(f"❌ Terjadi kesalahan: {str(e)}")
+        extra_parts = []
+        if download_duration is not None:
+            extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
+        if upload_duration is not None:
+            extra_parts.append(f"📤 Unggah: {upload_duration:.2f}s")
+        extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
+        await status_message.edit_text(f"❌ Terjadi kesalahan: {str(e)}{extras}")
     
     finally:
         # Cleanup
+        if local_file_path:
+            file_service.cleanup_file(local_file_path)
+
+
+async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /music command - download audio"""
+    if not await group_only_filter(update, context):
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Tolong berikan URL musik.\n"
+            "Contoh: <code>/music https://music.youtube.com/watch?v=hsfa1RSk0pA</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    url = context.args[0]
+    status_message = await update.message.reply_text("🎵 Memproses tautan musik...")
+    local_file_path = None
+    download_duration = None
+    upload_duration = None
+    metadata = None
+
+    try:
+        await status_message.edit_text("📥 Mengunduh audio...")
+
+        download_start = time.monotonic()
+        success, message, local_file_path, metadata = await file_service.download_audio(url)
+        download_duration = time.monotonic() - download_start
+
+        if not success:
+            extra = f"\n⏱️ Download: {download_duration:.2f}s" if download_duration is not None else ""
+            await status_message.edit_text(f"{message}{extra}")
+            return
+
+        await status_message.edit_text("📤 Mengunggah audio...")
+
+        kwargs = {}
+        title = metadata.get("title") if metadata else None
+        if title:
+            kwargs["title"] = title
+        duration_value = metadata.get("duration") if metadata else None
+        if duration_value:
+            try:
+                kwargs["duration"] = int(float(duration_value))
+            except (TypeError, ValueError):
+                pass
+
+        upload_start = time.monotonic()
+        with open(local_file_path, 'rb') as f:
+            await update.message.reply_audio(audio=f, **kwargs)
+        upload_duration = time.monotonic() - upload_start
+
+        display_name = title or (local_file_path.split('/')[-1] if local_file_path else "audio")
+        await status_message.edit_text(
+            "✅ Musik berhasil dikirim!\n"
+            f"🎶 {display_name}\n"
+            f"⏱️ Download: {download_duration:.2f}s\n"
+            f"📤 Unggah: {upload_duration:.2f}s"
+        )
+        logger.info(f"Music command successful for {display_name} in group {update.effective_chat.id}")
+
+    except Exception as e:
+        logger.error(f"Error in music command: {e}", exc_info=True)
+        extra_parts = []
+        if download_duration is not None:
+            extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
+        if upload_duration is not None:
+            extra_parts.append(f"📤 Unggah: {upload_duration:.2f}s")
+        extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
+        await status_message.edit_text(f"❌ Terjadi kesalahan: {str(e)}{extras}")
+
+    finally:
         if local_file_path:
             file_service.cleanup_file(local_file_path)
