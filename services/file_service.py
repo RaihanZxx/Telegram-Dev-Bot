@@ -86,6 +86,13 @@ class FileService:
         local_file_path: Optional[str] = None
         metadata: Optional[Dict[str, Optional[str]]] = None
 
+        def _normalize_url(original_url: str) -> str:
+            if "music.youtube.com" in original_url:
+                return original_url.replace("music.youtube.com", "www.youtube.com", 1)
+            return original_url
+
+        normalized_url = _normalize_url(url)
+
         def _download() -> Tuple[Any, Optional[str]]:
             ydl_opts: Any = {
                 "format": "bestaudio/best",
@@ -105,7 +112,7 @@ class FileService:
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info: Any = ydl.extract_info(url, download=True)
+                info: Any = ydl.extract_info(normalized_url, download=True)
                 file_path: Optional[str] = None
                 requested = info.get("requested_downloads") or []
                 if requested:
