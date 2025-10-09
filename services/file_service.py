@@ -156,6 +156,8 @@ class FileService:
                 self.cleanup_file(local_file_path)
 
             error_message = str(e).lower()
+            if "ffmpeg" in error_message or "ffprobe" in error_message:
+                return False, "❌ Gagal mengunduh audio: Server belum memiliki FFmpeg, hubungi admin untuk menginstalnya.", None, None
             if "confirm your age" in error_message or "age" in error_message:
                 return False, "❌ Gagal mengunduh audio: Video dibatasi usia dan memerlukan akun yang masuk.", None, None
 
