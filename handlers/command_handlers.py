@@ -9,6 +9,7 @@ from telegram.ext import ContextTypes
 from middleware.group_filter import group_only_filter
 from middleware.context_manager import context_manager
 from services.file_service import file_service
+from services.image_service import image_service
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -62,6 +63,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/mirror &lt;url&gt; - Download file dari URL\n"
         "/music &lt;url&gt; - Download audio dari tautan YouTube\n"
         "/clear_db - Bersihkan file sementara download (alias: /clear-db)\n\n"
+        "<b>AI Tools:</b>\n"
+        "/image &lt;deskripsi&gt; - Generate gambar dari prompt teks\n\n"
         "<b>Tips:</b>\n"
         "• Mention bot atau reply pesannya untuk bertanya\n"
         "• Bot memiliki memori percakapan selama 30 menit\n"
@@ -351,3 +354,45 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         if local_file_path:
             file_service.cleanup_file(local_file_path)
+
+
+async def image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /image command - generate images"""
+    if not await group_only_filter(update, context):
+        return
+
+    message = update.message
+    chat = update.effective_chat
+    if message is None or chat is None:
+        logger.warning("Image command without message or chat context")
+        return
+
+    prompt_parts = context.args or []
+    prompt = " ".join(prompt_parts).strip()
+
+    if not prompt and message.reply_to_message and message.reply_to_message.text:
+        prompt = message.reply_to_message.text.strip()
+
+    if not prompt:
+        await message.reply_text(
+            "❌ Tolong berikan deskripsi gambar.\n"
+            "Contoh: <code>/image kucing astronot</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    status_message = await message.reply_text("🎨 Menghasilkan gambar...")
+
+    try:
+        image_buffer = await image_service.generate_image(prompt)
+        if image_buffer is None:
+            await status_message.edit_text("❌ Gagal membuat gambar. Coba lagi nanti.")
+            return
+
+        await message.reply_photo(photo=image_buffer, caption=f"🖼️ Prompt: {prompt}")
+        await status_message.edit_text("✅ Gambar berhasil dibuat!")
+        logger.info("Image generated for prompt in group %s", chat.id)
+
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Error in image command: %s", exc, exc_info=True)
+        await status_message.edit_text("❌ Terjadi kesalahan saat membuat gambar.")

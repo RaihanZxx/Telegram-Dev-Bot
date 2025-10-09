@@ -14,7 +14,8 @@ from handlers.command_handlers import (
     clear_command,
     clear_db_command,
     mirror_command,
-    music_command
+    music_command,
+    image_command
 )
 from handlers.message_handlers import handle_message
 from utils.logger import setup_logger
@@ -64,6 +65,7 @@ def main():
     application.add_handler(MessageHandler(filters.Regex(r"^/clear-db(?:@\w+)?$"), clear_db_command))
     application.add_handler(CommandHandler("mirror", mirror_command))
     application.add_handler(CommandHandler("music", music_command))
+    application.add_handler(CommandHandler("image", image_command))
     
     # Register message handler (for chat)
     application.add_handler(

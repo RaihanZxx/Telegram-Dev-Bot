@@ -17,6 +17,9 @@ if not BYTEZ_API_KEY:
 BYTEZ_API_URL = "https://api.bytez.com/models/v2/Qwen/Qwen2.5-Coder-7B"
 BYTEZ_TIMEOUT = 300.0  # 5 minutes
 
+BYTEZ_IMAGE_MODEL_URL = "https://api.bytez.com/models/v2/stabilityai/stable-diffusion-xl-base-1.0"
+BYTEZ_IMAGE_TIMEOUT = 300.0
+
 # AI Model Parameters
 AI_MAX_LENGTH = 2048
 AI_TEMPERATURE = 0.7

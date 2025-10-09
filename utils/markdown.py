@@ -88,9 +88,8 @@ def format_telegram_markdown(text: str) -> str:
         for placeholder, original_block in code_blocks.items():
             escaped_text = escaped_text.replace(placeholder, original_block)
 
-        # Ensure code blocks are on separate lines
+        # Ensure opening code fences start on a new line
         escaped_text = re.sub(r'(?<!\n)```', r'\n```', escaped_text)
-        escaped_text = re.sub(r'```(?!\n)', r'```\n', escaped_text)
 
         return escaped_text
 
