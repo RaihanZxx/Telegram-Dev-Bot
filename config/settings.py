@@ -46,6 +46,9 @@ DOWNLOAD_TIMEOUT = 24 * 60 * 60  # 24 hours
 # Telegram upload timeout
 TELEGRAM_UPLOAD_TIMEOUT = 24 * 60 * 60  # 24 hours
 
+# Optional YouTube cookies file path for yt-dlp
+YT_COOKIES_FILE = os.getenv("YT_COOKIES_FILE")
+
 # Logging Configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 import httpx
 import yt_dlp
 from yt_dlp.utils import DownloadError
-from config.settings import TEMP_DIR, MAX_FILE_SIZE, DOWNLOAD_TIMEOUT
+from config.settings import TEMP_DIR, MAX_FILE_SIZE, DOWNLOAD_TIMEOUT, YT_COOKIES_FILE
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -20,6 +20,9 @@ class FileService:
         self.max_size = MAX_FILE_SIZE
         self.timeout = DOWNLOAD_TIMEOUT
         self.ffmpeg_available = shutil.which("ffmpeg") is not None
+        self.cookie_file = (
+            YT_COOKIES_FILE if YT_COOKIES_FILE and os.path.exists(YT_COOKIES_FILE) else None
+        )
         
         # Ensure temp directory exists
         if not os.path.exists(self.temp_dir):
@@ -117,6 +120,9 @@ class FileService:
                 ]
             else:
                 ydl_opts["prefer_ffmpeg"] = False
+
+            if self.cookie_file:
+                ydl_opts["cookiefile"] = self.cookie_file
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info: Any = ydl.extract_info(normalized_url, download=True)
