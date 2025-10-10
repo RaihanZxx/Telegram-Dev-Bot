@@ -194,14 +194,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     allowed, wait_time = rate_limiter.is_allowed(user_id)
     if not allowed:
         await message.reply_text(
-            f"⏳ Anda mengirim pesan terlalu cepat. "
-            f"Coba lagi dalam {wait_time} detik."
+            f"⏳ You sent the message too quickly. "
+            f"Try again in {wait_time} second."
         )
         logger.warning(f"Rate limit hit for user {user_id} in group {group_id}")
         return
     
     # Send thinking indicator
-    thinking_message = await message.reply_text("🤔 Berpikir...")
+    thinking_message = await message.reply_text("🤔 Think...")
 
     # Quick replies for simple greetings/tests
     normalized_user_message = _normalize_message(user_message)
@@ -210,7 +210,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         and " " not in normalized_user_message
         and normalized_user_message in GREETING_KEYWORDS
     ):
-        quick_response = "Halo! Ada yang bisa saya bantu?"
+        quick_response = "Hello! How can I help you??"
         formatted_quick_response = format_telegram_markdown(quick_response)
         await context.bot.edit_message_text(
             chat_id=chat.id,
@@ -310,11 +310,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.edit_message_text(
                 chat_id=chat.id,
                 message_id=thinking_message.message_id,
-                text="❌ Maaf, terjadi gangguan teknis. Coba lagi nanti."
+                text="❌ Sorry, there was a technical problem. Please try again later."
             )
         except Exception as edit_error:
             logger.error(f"Failed to edit error message: {edit_error}")
             # Fallback: send new message
             await message.reply_text(
-                "❌ Maaf, terjadi gangguan teknis. Coba lagi nanti."
+                "❌ Sorry, there was a technical problem. Please try again later."
             )

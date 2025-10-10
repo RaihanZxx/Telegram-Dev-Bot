@@ -69,19 +69,19 @@ class FileService:
                 self.cleanup_file(local_file_path)
                 return False, f"❌ File `{filename}` terlalu besar (> 2 GB).", None
             
-            return True, f"✅ File `{filename}` berhasil diunduh.", local_file_path
+            return True, f"✅ File `{filename}` downloaded successfully.", local_file_path
             
         except httpx.RequestError as e:
             logger.error(f"Request error while downloading: {e}")
             if local_file_path:
                 self.cleanup_file(local_file_path)
-            return False, "❌ Gagal mengunduh: URL tidak valid atau server tidak merespons.", None
+            return False, "❌ Download failed: Invalid URL or server not responding.", None
             
         except Exception as e:
             logger.error(f"Unexpected error while downloading: {e}", exc_info=True)
             if local_file_path:
                 self.cleanup_file(local_file_path)
-            return False, f"❌ Terjadi kesalahan: {str(e)}", None
+            return False, f"❌ There is an error: {str(e)}", None
     
     async def download_audio(self, url: str) -> Tuple[bool, str, Optional[str], Optional[Dict[str, Optional[str]]]]:
         """
@@ -160,14 +160,14 @@ class FileService:
 
             if not local_file_path or not os.path.exists(local_file_path):
                 logger.error("yt-dlp did not return a valid file path")
-                return False, "❌ Gagal mengunduh audio.", None, None
+                return False, "❌ Failed to download audio.", None, None
 
             file_size = os.path.getsize(local_file_path)
             logger.info(f"Downloaded audio file: {local_file_path} ({file_size} bytes)")
 
             if file_size > self.max_size:
                 self.cleanup_file(local_file_path)
-                return False, "❌ File audio terlalu besar (> 2 GB).", None, None
+                return False, "❌ Audio file is too large (> 2 GB).", None, None
 
             metadata = {
                 "title": info.get("title") if isinstance(info.get("title"), str) else None,
@@ -175,7 +175,7 @@ class FileService:
             }
 
             display_name = metadata.get("title") or os.path.basename(local_file_path)
-            return True, f"✅ Audio `{display_name}` berhasil diunduh.", local_file_path, metadata
+            return True, f"✅ Audio `{display_name}` downloaded successfully.", local_file_path, metadata
 
         except DownloadError as e:
             logger.error(f"yt-dlp download error: {e}")
@@ -184,19 +184,19 @@ class FileService:
 
             error_message = str(e).lower()
             if "ffmpeg" in error_message or "ffprobe" in error_message:
-                return False, "❌ Gagal mengunduh audio: Server belum memiliki FFmpeg, hubungi admin untuk menginstalnya.", None, None
+                return False, "❌ Failed to download audio: Server does not have FFmpeg installed, contact admin to install it.", None, None
             if "confirm your age" in error_message or "age" in error_message:
-                return False, "❌ Gagal mengunduh audio: Video dibatasi usia dan memerlukan akun yang masuk.", None, None
+                return False, "❌ Failed to download audio: Video is age restricted and requires a signed in account..", None, None
 
             detail = str(e).strip()
             if detail:
-                return False, f"❌ Gagal mengunduh audio: {detail}", None, None
-            return False, "❌ Gagal mengunduh audio: URL tidak valid atau konten tidak tersedia.", None, None
+                return False, f"❌ Failed to download audio: {detail}", None, None
+            return False, "❌ Failed to download audio: Invalid URL or content unavailable.", None, None
         except Exception as e:
             logger.error(f"Unexpected error during audio download: {e}", exc_info=True)
             if local_file_path:
                 self.cleanup_file(local_file_path)
-            return False, f"❌ Terjadi kesalahan: {str(e)}", None, None
+            return False, f"❌ There is an error: {str(e)}", None, None
 
     def cleanup_file(self, file_path: str):
         """

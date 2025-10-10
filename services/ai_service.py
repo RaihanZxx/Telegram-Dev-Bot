@@ -98,22 +98,22 @@ class AIService:
                 
             except httpx.TimeoutException:
                 logger.error("Timeout while contacting AI API")
-                return "⏱️ AI membutuhkan waktu terlalu lama untuk merespons. Coba lagi nanti."
+                return "⏱️ AI is taking too long to respond. Please try again later."
                 
             except httpx.HTTPStatusError as e:
                 logger.error(f"HTTP error from AI API: {e.response.status_code}")
                 logger.debug(f"Response body: {e.response.text}")
                 
                 if e.response.status_code == 401:
-                    return "🔒 Kesalahan otentikasi. API Key tidak valid."
+                    return "🔒 Authentication error. Invalid API Key."
                 elif e.response.status_code == 429:
-                    return "⚠️ Terlalu banyak permintaan. Coba lagi sesaat."
+                    return "⚠️ Too many requests. Please try again later."
                 else:
-                    return f"❌ Terjadi kesalahan saat menghubungi AI (HTTP {e.response.status_code})."
+                    return f"❌ An error occurred while contacting AI (HTTP {e.response.status_code})."
                     
             except Exception as e:
                 logger.error(f"Unexpected error in AI service: {e}", exc_info=True)
-                return "❌ Terjadi masalah internal. Coba lagi nanti."
+                return "❌ An internal problem occurred. Please try again later."
 
 # Global AI service instance
 ai_service = AIService()

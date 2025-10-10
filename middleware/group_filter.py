@@ -37,8 +37,8 @@ async def group_only_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         # Send message to user explaining bot only works in groups
         if update.message:
             await update.message.reply_text(
-                "⚠️ Bot ini hanya bekerja di grup!\n\n"
-                "Silakan tambahkan bot ke grup Telegram Anda untuk menggunakan fitur-fiturnya."
+                "⚠️ This bot only works in groups!\n\n"
+                "Please add the bot to your Telegram group to use its features."
             )
         return False
     
