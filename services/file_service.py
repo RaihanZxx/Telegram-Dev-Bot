@@ -193,26 +193,42 @@ class FileService:
                 last_sent = {"t": 0.0}
 
                 def _hook(d: Dict[str, Any]):
-                    if d.get("status") != "downloading":
-                        return
-                    downloaded = int(d.get("downloaded_bytes") or 0)
-                    total = d.get("total_bytes") or d.get("total_bytes_estimate")
-                    total_int = int(total) if isinstance(total, (int, float)) else None
-                    speed = d.get("speed")
-                    eta = d.get("eta")
+                    status = d.get("status")
                     now = time.monotonic()
-                    if now - last_sent["t"] < 1.0:
-                        return
-                    last_sent["t"] = now
-                    if current_loop is not None:
-                        try:
-                            fut = asyncio.run_coroutine_threadsafe(
-                                progress_callback(downloaded, total_int, float(speed) if speed else None, float(eta) if eta else None),
-                                current_loop,
-                            )
-                            # Fire-and-forget, ignore result to avoid blocking
-                        except Exception as _:
-                            pass
+                    if status == "downloading":
+                        downloaded = int(d.get("downloaded_bytes") or 0)
+                        total = d.get("total_bytes") or d.get("total_bytes_estimate")
+                        total_int = int(total) if isinstance(total, (int, float)) else None
+                        speed = d.get("speed")
+                        eta = d.get("eta")
+                        if now - last_sent["t"] < 1.0:
+                            return
+                        last_sent["t"] = now
+                        if current_loop is not None:
+                            try:
+                                asyncio.run_coroutine_threadsafe(
+                                    progress_callback(downloaded, total_int, float(speed) if speed else None, float(eta) if eta else None),
+                                    current_loop,
+                                )
+                            except Exception:
+                                pass
+                    elif status == "finished":
+                        # Ensure we push a final 100% update so UI doesn't look stuck at ~97%
+                        downloaded = int(
+                            d.get("total_bytes")
+                            or d.get("downloaded_bytes")
+                            or d.get("total_bytes_estimate")
+                            or 0
+                        )
+                        total_int = downloaded if downloaded > 0 else None
+                        if current_loop is not None:
+                            try:
+                                asyncio.run_coroutine_threadsafe(
+                                    progress_callback(downloaded, total_int, None, 0.0),
+                                    current_loop,
+                                )
+                            except Exception:
+                                pass
 
                 ydl_opts["progress_hooks"] = [_hook]
 
