@@ -112,7 +112,8 @@ def clean_ai_response(text: str) -> str:
         Cleaned text
     """
     # Remove thinking tags (for models that expose reasoning)
-    text = re.sub(r'<think>.*?</think>\s*', '', text, flags=re.DOTALL | re.IGNORECASE)
+    # Handle both normal </think> and escaped </\think> from AI models
+    text = re.sub(r'<think>.*?</\\?think>\s*', '', text, flags=re.DOTALL | re.IGNORECASE)
 
     # Trim at known code-insertion markers
     for marker in (
