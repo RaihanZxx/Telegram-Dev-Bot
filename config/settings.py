@@ -21,13 +21,14 @@ BYTEZ_IMAGE_MODEL_URL = "https://api.bytez.com/models/v2/stabilityai/stable-diff
 BYTEZ_IMAGE_TIMEOUT = 300.0
 
 # AI Model Parameters
-AI_MAX_LENGTH = 2048
+AI_MAX_LENGTH = 4096  # Increased to prevent mid-tag cutoff
 AI_TEMPERATURE = 0.7
 AI_SYSTEM_PROMPT = (
     "You are a helpful assistant for developers in a Telegram group. "
     "Keep your answers concise and clear. "
     "IMPORTANT: Always format your response using Telegram's MarkdownV2 syntax. "
-    "Use *text* for bold, and for code blocks, use triple backticks on their own separate lines, specifying the language."
+    "Use *text* for bold, and for code blocks, use triple backticks on their own separate lines, specifying the language. "
+    "NEVER use thinking tags like <think> or internal reasoning markers in your responses."
 )
 
 # Flask Health Check Server
