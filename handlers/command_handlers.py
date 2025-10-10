@@ -1,5 +1,6 @@
 """Command handlers for the bot"""
 import asyncio
+import os
 import time
 from math import log2
 from typing import Optional
@@ -13,6 +14,7 @@ from middleware.context_manager import context_manager
 from services.file_service import file_service
 from services.image_service import image_service
 from utils.logger import setup_logger
+from utils.upload_progress import UploadProgressReader
 
 logger = setup_logger(__name__)
 
@@ -236,16 +238,56 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await status_message.edit_text("❌ File not available after download.")
             return
         
-        # Upload to Telegram
+        # Upload to Telegram with progress
         await status_message.edit_text(f"📤 Uploading `{filename}`...")
-        
+
+        file_size = os.path.getsize(local_file_path)
+        base_f = open(local_file_path, 'rb')
+        wrapped = UploadProgressReader(base_f, file_size)
+        stop_event = asyncio.Event()
+
+        async def _upload_progress_updater():
+            last = 0.0
+            while not stop_event.is_set():
+                try:
+                    now = time.monotonic()
+                    if now - last >= 1.0:
+                        read = wrapped.bytes_read
+                        percent = (read / file_size * 100.0) if file_size else 0.0
+                        bar = _progress_bar(percent)
+                        elapsed = max(0.001, now - wrapped.start_time)
+                        speed = int(read / elapsed)
+                        eta = (file_size - read) / speed if speed > 0 else None
+                        text = (
+                            f"📤 Uploading `{filename}`\n"
+                            f"{bar}\n"
+                            f"{_format_size(read)} / {_format_size(file_size)}\n"
+                            f"⚡ {_format_size(speed)}/s | ⏳ {_format_eta(eta)}"
+                        )
+                        await status_message.edit_text(text)
+                        last = now
+                except Exception:
+                    pass
+                await asyncio.sleep(0.5)
+
         upload_start = time.monotonic()
-        with open(local_file_path, 'rb') as f:
+        updater_task = asyncio.create_task(_upload_progress_updater())
+        try:
             await message.reply_document(
-                document=f,
+                document=wrapped,
                 read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                write_timeout=TELEGRAM_UPLOAD_TIMEOUT
+                write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
             )
+        finally:
+            stop_event.set()
+            try:
+                await updater_task
+            except Exception:
+                pass
+            try:
+                base_f.close()
+            except Exception:
+                pass
         upload_duration = time.monotonic() - upload_start
         
         success_text = (
@@ -395,14 +437,54 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except (TypeError, ValueError):
                 pass
 
+        file_size = os.path.getsize(local_file_path)
+        base_f = open(local_file_path, 'rb')
+        wrapped = UploadProgressReader(base_f, file_size)
+        stop_event = asyncio.Event()
+
+        async def _upload_progress_updater_audio():
+            last = 0.0
+            while not stop_event.is_set():
+                try:
+                    now = time.monotonic()
+                    if now - last >= 1.0:
+                        read = wrapped.bytes_read
+                        percent = (read / file_size * 100.0) if file_size else 0.0
+                        bar = _progress_bar(percent)
+                        elapsed = max(0.001, now - wrapped.start_time)
+                        speed = int(read / elapsed)
+                        eta = (file_size - read) / speed if speed > 0 else None
+                        text = (
+                            "📤 Uploading audio...\n"
+                            f"{bar}\n"
+                            f"{_format_size(read)} / {_format_size(file_size)}\n"
+                            f"⚡ {_format_size(speed)}/s | ⏳ {_format_eta(eta)}"
+                        )
+                        await status_message.edit_text(text)
+                        last = now
+                except Exception:
+                    pass
+                await asyncio.sleep(0.5)
+
         upload_start = time.monotonic()
-        with open(local_file_path, 'rb') as f:
+        updater_task = asyncio.create_task(_upload_progress_updater_audio())
+        try:
             await message.reply_audio(
-                audio=f,
+                audio=wrapped,
                 read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
                 write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
                 **kwargs,
             )
+        finally:
+            stop_event.set()
+            try:
+                await updater_task
+            except Exception:
+                pass
+            try:
+                base_f.close()
+            except Exception:
+                pass
         upload_duration = time.monotonic() - upload_start
 
         display_name = title or local_file_path.split('/')[-1]
