@@ -1,6 +1,8 @@
 """Command handlers for the bot"""
 import asyncio
 import time
+from math import log2
+from typing import Optional
 
 from telegram import Update
 from telegram.error import TimedOut, TelegramError
@@ -13,6 +15,30 @@ from services.image_service import image_service
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
+
+
+def _format_size(n: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    if n <= 0:
+        return "0 B"
+    idx = min(int(log2(n) / 10), len(units) - 1)
+    return f"{n / (1 << (10 * idx)):.2f} {units[idx]}"
+
+
+def _format_eta(seconds: Optional[float]) -> str:
+    if not seconds or seconds <= 0:
+        return "--:--"
+    seconds = int(seconds)
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def _progress_bar(percent: float, width: int = 20) -> str:
+    percent = max(0.0, min(100.0, percent))
+    filled = int(round((percent / 100.0) * width))
+    return f"[{'█' * filled}{'░' * (width - filled)}] {percent:5.1f}%"
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
@@ -172,12 +198,33 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # Extract filename for display
         filename = url.split('/')[-1].split('?')[0] or "file"
-        
+
         await status_message.edit_text(f"📥 Downloading `{filename}`...")
-        
+
+        async def _on_progress(downloaded: int, total: Optional[int], speed_bps: float):
+            try:
+                if total and total > 0:
+                    percent = (downloaded / total) * 100.0
+                    bar = _progress_bar(percent)
+                    text = (
+                        f"📥 Downloading `{filename}`\n"
+                        f"{bar}\n"
+                        f"{_format_size(downloaded)} / { _format_size(total) }\n"
+                        f"⚡ {_format_size(int(speed_bps))}/s | ⏳ {_format_eta((total - downloaded) / speed_bps if speed_bps else None)}"
+                    )
+                else:
+                    text = (
+                        f"📥 Downloading `{filename}`\n"
+                        f"{_format_size(downloaded)} downloaded\n"
+                        f"⚡ {_format_size(int(speed_bps))}/s"
+                    )
+                await status_message.edit_text(text)
+            except Exception as _:
+                pass
+
         # Download file
         download_start = time.monotonic()
-        success, status_text, local_file_path = await file_service.download_file(url)
+        success, status_text, local_file_path = await file_service.download_file(url, progress_callback=_on_progress)
         download_duration = time.monotonic() - download_start
         
         if not success:
@@ -301,8 +348,29 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await status_message.edit_text("📥 Downloading audio...")
 
+        async def _on_progress(downloaded: int, total: Optional[int], speed: Optional[float], eta: Optional[float]):
+            try:
+                if total and total > 0:
+                    percent = (downloaded / total) * 100.0
+                    bar = _progress_bar(percent)
+                    text = (
+                        "🎵 Downloading audio...\n"
+                        f"{bar}\n"
+                        f"{_format_size(downloaded)} / { _format_size(total) }\n"
+                        f"⚡ {_format_size(int(speed or 0))}/s | ⏳ {_format_eta(eta)}"
+                    )
+                else:
+                    text = (
+                        "🎵 Downloading audio...\n"
+                        f"{_format_size(downloaded)} downloaded\n"
+                        f"⚡ {_format_size(int(speed or 0))}/s"
+                    )
+                await status_message.edit_text(text)
+            except Exception:
+                pass
+
         download_start = time.monotonic()
-        success, info_message, local_file_path, metadata = await file_service.download_audio(url)
+        success, info_message, local_file_path, metadata = await file_service.download_audio(url, progress_callback=_on_progress)
         download_duration = time.monotonic() - download_start
 
         if not success:

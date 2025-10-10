@@ -3,7 +3,8 @@ import asyncio
 import os
 import shutil
 import tempfile
-from typing import Any, Dict, Optional, Tuple
+import time
+from typing import Any, Callable, Optional, Tuple, Dict, Awaitable
 
 import httpx
 import yt_dlp
@@ -30,12 +31,18 @@ class FileService:
             os.makedirs(self.temp_dir)
             logger.info(f"Created temp directory: {self.temp_dir}")
     
-    async def download_file(self, url: str) -> Tuple[bool, str, Optional[str]]:
+    async def download_file(
+        self,
+        url: str,
+        progress_callback: Optional[Callable[[int, Optional[int], float], Awaitable[None]]] = None,
+    ) -> Tuple[bool, str, Optional[str]]:
         """
         Download file from URL.
         
         Args:
             url: File URL
+            progress_callback: Optional async callback invoked periodically with
+                (downloaded_bytes, total_bytes or None, speed_bytes_per_sec)
             
         Returns:
             Tuple of (success, message, local_file_path)
@@ -57,9 +64,40 @@ class FileService:
                 with open(local_file_path, 'wb') as f:
                     async with client.stream('GET', url) as response:
                         response.raise_for_status()
-                        
+
+                        total_header = response.headers.get("Content-Length")
+                        total_size = int(total_header) if total_header and total_header.isdigit() else None
+                        downloaded = 0
+                        start_time = time.monotonic()
+                        last_update = start_time
+
                         async for chunk in response.aiter_bytes():
+                            if not chunk:
+                                continue
                             f.write(chunk)
+                            downloaded += len(chunk)
+
+                            # Throttle progress updates to ~1/sec
+                            if progress_callback:
+                                now = time.monotonic()
+                                if now - last_update >= 1.0:
+                                    elapsed = max(0.001, now - start_time)
+                                    speed = downloaded / elapsed
+                                    try:
+                                        await progress_callback(downloaded, total_size, speed)
+                                    except Exception as cb_err:
+                                        logger.debug("Progress callback error (ignored): %s", cb_err)
+                                    last_update = now
+
+                        # Final progress update at completion
+                        if progress_callback:
+                            now = time.monotonic()
+                            elapsed = max(0.001, now - start_time)
+                            speed = downloaded / elapsed
+                            try:
+                                await progress_callback(downloaded, total_size, speed)
+                            except Exception as cb_err:
+                                logger.debug("Progress callback error (ignored): %s", cb_err)
             
             # Check file size
             file_size = os.path.getsize(local_file_path)
@@ -83,7 +121,11 @@ class FileService:
                 self.cleanup_file(local_file_path)
             return False, f"❌ There is an error: {str(e)}", None
     
-    async def download_audio(self, url: str) -> Tuple[bool, str, Optional[str], Optional[Dict[str, Optional[str]]]]:
+    async def download_audio(
+        self,
+        url: str,
+        progress_callback: Optional[Callable[[int, Optional[int], Optional[float], Optional[float]], Awaitable[None]]] = None,
+    ) -> Tuple[bool, str, Optional[str], Optional[Dict[str, Optional[str]]]]:
         """
         Download audio content using yt-dlp.
 
@@ -114,6 +156,12 @@ class FileService:
                 logger.error("Failed to prepare cookie file: %s", cookie_error, exc_info=True)
                 return None
 
+        # Capture the current asyncio loop to be used from the worker thread
+        try:
+            current_loop = asyncio.get_running_loop() if progress_callback else None
+        except RuntimeError:
+            current_loop = None
+
         def _download(cookiefile: Optional[str]) -> Tuple[Any, Optional[str]]:
             ydl_opts: Any = {
                 "format": "bestaudio[ext=m4a]/bestaudio/best",
@@ -139,6 +187,34 @@ class FileService:
 
             if cookiefile:
                 ydl_opts["cookiefile"] = cookiefile
+
+            # Prepare progress hook bridging from thread to asyncio loop
+            if progress_callback is not None:
+                last_sent = {"t": 0.0}
+
+                def _hook(d: Dict[str, Any]):
+                    if d.get("status") != "downloading":
+                        return
+                    downloaded = int(d.get("downloaded_bytes") or 0)
+                    total = d.get("total_bytes") or d.get("total_bytes_estimate")
+                    total_int = int(total) if isinstance(total, (int, float)) else None
+                    speed = d.get("speed")
+                    eta = d.get("eta")
+                    now = time.monotonic()
+                    if now - last_sent["t"] < 1.0:
+                        return
+                    last_sent["t"] = now
+                    if current_loop is not None:
+                        try:
+                            fut = asyncio.run_coroutine_threadsafe(
+                                progress_callback(downloaded, total_int, float(speed) if speed else None, float(eta) if eta else None),
+                                current_loop,
+                            )
+                            # Fire-and-forget, ignore result to avoid blocking
+                        except Exception as _:
+                            pass
+
+                ydl_opts["progress_hooks"] = [_hook]
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info: Any = ydl.extract_info(normalized_url, download=True)
