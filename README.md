@@ -96,12 +96,6 @@ Edit `config/settings.py` untuk mengatur:
 - ✅ Input sanitization
 - ✅ Error handling
 
-## 📊 Monitoring
-
-Bot menyediakan health check endpoint:
-- `http://localhost:8080/` - Status check
-- `http://localhost:8080/health` - Health check
-
 ## 🐛 Troubleshooting
 
 **Bot tidak merespon di grup:**
