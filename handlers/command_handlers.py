@@ -192,192 +192,187 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     url = context.args[0]
     status_message = await message.reply_text("🔗 Starting download...")
-    local_file_path = None
-    download_duration = None
-    upload_duration = None
-    upload_start = None
-    
-    try:
-        # Extract filename for display
-        filename = url.split('/')[-1].split('?')[0] or "file"
 
-        await status_message.edit_text(f"📥 Downloading `{filename}`...")
+    async def _runner():
+        local_file_path = None
+        download_duration = None
+        upload_duration = None
+        upload_start = None
+        try:
+            filename = url.split('/')[-1].split('?')[0] or "file"
+            await status_message.edit_text(f"📥 Downloading `{filename}`...")
 
-        async def _on_progress(downloaded: int, total: Optional[int], speed_bps: float):
-            try:
-                if total and total > 0:
-                    percent = (downloaded / total) * 100.0
-                    bar = _progress_bar(percent)
-                    text = (
-                        f"📥 Downloading `{filename}`\n"
-                        f"{bar}\n"
-                        f"{_format_size(downloaded)} / { _format_size(total) }\n"
-                        f"⚡ {_format_size(int(speed_bps))}/s | ⏳ {_format_eta((total - downloaded) / speed_bps if speed_bps else None)}"
-                    )
-                else:
-                    text = (
-                        f"📥 Downloading `{filename}`\n"
-                        f"{_format_size(downloaded)} downloaded\n"
-                        f"⚡ {_format_size(int(speed_bps))}/s"
-                    )
-                await status_message.edit_text(text)
-            except Exception as _:
-                pass
-
-        # Download file
-        download_start = time.monotonic()
-        success, status_text, local_file_path = await file_service.download_file(url, progress_callback=_on_progress)
-        download_duration = time.monotonic() - download_start
-        
-        if not success:
-            extra = f"\n⏱️ Download: {download_duration:.2f}s" if download_duration is not None else ""
-            await status_message.edit_text(f"{status_text}{extra}")
-            return
-        
-        if local_file_path is None:
-            await status_message.edit_text("❌ File not available after download.")
-            return
-        
-        # Upload to Telegram with progress
-        await status_message.edit_text(f"📤 Uploading `{filename}`...")
-
-        file_size = os.path.getsize(local_file_path)
-        base_f = open(local_file_path, 'rb')
-        wrapped = UploadProgressReader(base_f, file_size)
-        stop_event = asyncio.Event()
-
-        async def _upload_progress_updater():
-            last = 0.0
-            while not stop_event.is_set():
+            async def _on_progress(downloaded: int, total: Optional[int], speed_bps: float):
                 try:
-                    now = time.monotonic()
-                    if now - last >= 1.0:
-                        read = wrapped.bytes_read
-                        percent = (read / file_size * 100.0) if file_size else 0.0
+                    if total and total > 0:
+                        percent = (downloaded / total) * 100.0
                         bar = _progress_bar(percent)
-                        elapsed = max(0.001, now - wrapped.start_time)
-                        speed = int(read / elapsed)
-                        eta = (file_size - read) / speed if speed > 0 else None
                         text = (
-                            f"📤 Uploading `{filename}`\n"
+                            f"📥 Downloading `{filename}`\n"
                             f"{bar}\n"
-                            f"{_format_size(read)} / {_format_size(file_size)}\n"
-                            f"⚡ {_format_size(speed)}/s | ⏳ {_format_eta(eta)}"
+                            f"{_format_size(downloaded)} / { _format_size(total) }\n"
+                            f"⚡ {_format_size(int(speed_bps))}/s | ⏳ {_format_eta((total - downloaded) / speed_bps if speed_bps else None)}"
                         )
-                        await status_message.edit_text(text)
-                        last = now
+                    else:
+                        text = (
+                            f"📥 Downloading `{filename}`\n"
+                            f"{_format_size(downloaded)} downloaded\n"
+                            f"⚡ {_format_size(int(speed_bps))}/s"
+                        )
+                    await status_message.edit_text(text)
                 except Exception:
                     pass
-                await asyncio.sleep(0.5)
 
-        upload_start = time.monotonic()
-        updater_task = asyncio.create_task(_upload_progress_updater())
-        try:
-            try:
-                await message.reply_document(
-                    document=wrapped,
-                    read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                    write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                )
-            except NetworkError as ne:
-                # Fallback for proxies/self-hosted Bot API that reject large multipart uploads (HTTP 413)
-                if "Request Entity Too Large" in str(ne):
-                    logger.warning("Upload rejected with 413. Falling back to Telegram fetch-by-URL.")
+            download_start = time.monotonic()
+            success, status_text, local_file_path = await file_service.download_file(url, progress_callback=_on_progress)
+            download_duration = time.monotonic() - download_start
+
+            if not success:
+                extra = f"\n⏱️ Download: {download_duration:.2f}s" if download_duration is not None else ""
+                await status_message.edit_text(f"{status_text}{extra}")
+                return
+
+            if local_file_path is None:
+                await status_message.edit_text("❌ File not available after download.")
+                return
+
+            await status_message.edit_text(f"📤 Uploading `{filename}`...")
+
+            file_size = os.path.getsize(local_file_path)
+            base_f = open(local_file_path, 'rb')
+            wrapped = UploadProgressReader(base_f, file_size)
+            stop_event = asyncio.Event()
+
+            async def _upload_progress_updater():
+                last = 0.0
+                while not stop_event.is_set():
                     try:
-                        await status_message.edit_text(
-                            f"⚠️ Upload too large for direct send. Trying via URL fetch...\n📎 {filename}"
-                        )
+                        now = time.monotonic()
+                        if now - last >= 1.0:
+                            read = wrapped.bytes_read
+                            percent = (read / file_size * 100.0) if file_size else 0.0
+                            bar = _progress_bar(percent)
+                            elapsed = max(0.001, now - wrapped.start_time)
+                            speed = int(read / elapsed)
+                            eta = (file_size - read) / speed if speed > 0 else None
+                            text = (
+                                f"📤 Uploading `{filename}`\n"
+                                f"{bar}\n"
+                                f"{_format_size(read)} / {_format_size(file_size)}\n"
+                                f"⚡ {_format_size(speed)}/s | ⏳ {_format_eta(eta)}"
+                            )
+                            await status_message.edit_text(text)
+                            last = now
                     except Exception:
                         pass
-                    # Let Telegram servers fetch the file from the original URL
+                    await asyncio.sleep(0.5)
+
+            upload_start = time.monotonic()
+            updater_task = asyncio.create_task(_upload_progress_updater())
+            try:
+                try:
                     await message.reply_document(
-                        document=url,
+                        document=wrapped,
                         read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
                         write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
                     )
-                else:
-                    raise
+                except NetworkError as ne:
+                    if "Request Entity Too Large" in str(ne):
+                        logger.warning("Upload rejected with 413. Falling back to Telegram fetch-by-URL.")
+                        try:
+                            await status_message.edit_text(
+                                f"⚠️ Upload too large for direct send. Trying via URL fetch...\n📎 {filename}"
+                            )
+                        except Exception:
+                            pass
+                        await message.reply_document(
+                            document=url,
+                            read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                            write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                        )
+                    else:
+                        raise
+            finally:
+                stop_event.set()
+                try:
+                    await updater_task
+                except Exception:
+                    pass
+                try:
+                    base_f.close()
+                except Exception:
+                    pass
+            upload_duration = time.monotonic() - upload_start
+
+            success_text = (
+                "✅ Finished!\n"
+                f"📄 {filename}\n"
+                f"⏱️ Download: {download_duration:.2f}s\n"
+                f"📤 Upload: {upload_duration:.2f}s"
+            )
+            try:
+                await status_message.edit_text(success_text)
+            except (TimedOut, asyncio.TimeoutError) as edit_error:
+                logger.warning(f"Status message update timed out: {edit_error}")
+            except TelegramError as edit_error:
+                logger.warning(f"Status message update failed: {edit_error}")
+            logger.info(f"Mirror successful for {filename} in group {chat.id}")
+
+        except TimedOut as e:
+            logger.error(f"Upload timed out for mirror command: {e}", exc_info=True)
+            if upload_start is not None:
+                upload_duration = time.monotonic() - upload_start
+            extra_parts = []
+            if download_duration is not None:
+                extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
+            if upload_duration is not None:
+                extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
+            extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
+            try:
+                await status_message.edit_text(
+                    "❌ An error occurred: Uploading to Telegram exceeded the time limit.."
+                    " Please try again in a few moments." + extras
+                )
+            except (TimedOut, asyncio.TimeoutError) as edit_error:
+                logger.warning(f"Status message update timed out after upload timeout: {edit_error}")
+            except TelegramError as edit_error:
+                logger.warning(f"Status message update failed after upload timeout: {edit_error}")
+            return
+        except asyncio.TimeoutError as e:
+            logger.error(f"Async operation timed out for mirror command: {e}", exc_info=True)
+            if upload_start is not None:
+                upload_duration = time.monotonic() - upload_start
+            extra_parts = []
+            if download_duration is not None:
+                extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
+            if upload_duration is not None:
+                extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
+            extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
+            try:
+                await status_message.edit_text(
+                    "❌ An error occurred: Uploading to Telegram exceeded the time limit."
+                    " Please try again in a few moments." + extras
+                )
+            except (TimedOut, asyncio.TimeoutError) as edit_error:
+                logger.warning(f"Status message update timed out after async timeout: {edit_error}")
+            except TelegramError as edit_error:
+                logger.warning(f"Status message update failed after async timeout: {edit_error}")
+            return
+        except Exception as e:
+            logger.error(f"Error in mirror command: {e}", exc_info=True)
+            extra_parts = []
+            if download_duration is not None:
+                extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
+            if upload_duration is not None:
+                extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
+            extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
+            await status_message.edit_text(f"❌ There is an error: {str(e)}{extras}")
         finally:
-            stop_event.set()
-            try:
-                await updater_task
-            except Exception:
-                pass
-            try:
-                base_f.close()
-            except Exception:
-                pass
-        upload_duration = time.monotonic() - upload_start
-        
-        success_text = (
-            "✅ Finished!\n"
-            f"📄 {filename}\n"
-            f"⏱️ Download: {download_duration:.2f}s\n"
-            f"📤 Upload: {upload_duration:.2f}s"
-        )
-        try:
-            await status_message.edit_text(success_text)
-        except (TimedOut, asyncio.TimeoutError) as edit_error:
-            logger.warning(f"Status message update timed out: {edit_error}")
-        except TelegramError as edit_error:
-            logger.warning(f"Status message update failed: {edit_error}")
-        logger.info(f"Mirror successful for {filename} in group {chat.id}")
-        
-    except TimedOut as e:
-        logger.error(f"Upload timed out for mirror command: {e}", exc_info=True)
-        if upload_start is not None:
-            upload_duration = time.monotonic() - upload_start
-        extra_parts = []
-        if download_duration is not None:
-            extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
-        if upload_duration is not None:
-            extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
-        extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
-        try:
-            await status_message.edit_text(
-                "❌ An error occurred: Uploading to Telegram exceeded the time limit.."
-                " Please try again in a few moments." + extras
-            )
-        except (TimedOut, asyncio.TimeoutError) as edit_error:
-            logger.warning(f"Status message update timed out after upload timeout: {edit_error}")
-        except TelegramError as edit_error:
-            logger.warning(f"Status message update failed after upload timeout: {edit_error}")
-        return
-    except asyncio.TimeoutError as e:
-        logger.error(f"Async operation timed out for mirror command: {e}", exc_info=True)
-        if upload_start is not None:
-            upload_duration = time.monotonic() - upload_start
-        extra_parts = []
-        if download_duration is not None:
-            extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
-        if upload_duration is not None:
-            extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
-        extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
-        try:
-            await status_message.edit_text(
-                "❌ An error occurred: Uploading to Telegram exceeded the time limit."
-                " Please try again in a few moments." + extras
-            )
-        except (TimedOut, asyncio.TimeoutError) as edit_error:
-            logger.warning(f"Status message update timed out after async timeout: {edit_error}")
-        except TelegramError as edit_error:
-            logger.warning(f"Status message update failed after async timeout: {edit_error}")
-        return
-        
-    except Exception as e:
-        logger.error(f"Error in mirror command: {e}", exc_info=True)
-        extra_parts = []
-        if download_duration is not None:
-            extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
-        if upload_duration is not None:
-            extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
-        extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
-        await status_message.edit_text(f"❌ There is an error: {str(e)}{extras}")
-    
-    finally:
-        # Cleanup
-        if local_file_path:
-            file_service.cleanup_file(local_file_path)
+            if local_file_path:
+                file_service.cleanup_file(local_file_path)
+
+    context.application.create_task(_runner())
+    return
 
 
 async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -401,133 +396,136 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     url = context.args[0]
     status_message = await message.reply_text("🎵 Processing music links...")
-    local_file_path = None
-    download_duration = None
-    upload_duration = None
-    metadata = None
 
-    try:
-        await status_message.edit_text("📥 Downloading audio...")
+    async def _runner():
+        local_file_path = None
+        download_duration = None
+        upload_duration = None
+        metadata = None
+        try:
+            await status_message.edit_text("📥 Downloading audio...")
 
-        async def _on_progress(downloaded: int, total: Optional[int], speed: Optional[float], eta: Optional[float]):
-            try:
-                if total and total > 0:
-                    percent = (downloaded / total) * 100.0
-                    bar = _progress_bar(percent)
-                    text = (
-                        "🎵 Downloading audio...\n"
-                        f"{bar}\n"
-                        f"{_format_size(downloaded)} / { _format_size(total) }\n"
-                        f"⚡ {_format_size(int(speed or 0))}/s | ⏳ {_format_eta(eta)}"
-                    )
-                else:
-                    text = (
-                        "🎵 Downloading audio...\n"
-                        f"{_format_size(downloaded)} downloaded\n"
-                        f"⚡ {_format_size(int(speed or 0))}/s"
-                    )
-                await status_message.edit_text(text)
-            except Exception:
-                pass
-
-        download_start = time.monotonic()
-        success, info_message, local_file_path, metadata = await file_service.download_audio(url, progress_callback=_on_progress)
-        download_duration = time.monotonic() - download_start
-
-        if not success:
-            extra = f"\n⏱️ Download: {download_duration:.2f}s" if download_duration is not None else ""
-            await status_message.edit_text(f"{info_message}{extra}")
-            return
-        
-        if local_file_path is None:
-            await status_message.edit_text("❌ Audio file is not available after download.")
-            return
-
-        await status_message.edit_text("📤 Uploading audio...")
-
-        kwargs = {}
-        title = metadata.get("title") if metadata else None
-        if title:
-            kwargs["title"] = title
-        duration_value = metadata.get("duration") if metadata else None
-        if duration_value:
-            try:
-                kwargs["duration"] = int(float(duration_value))
-            except (TypeError, ValueError):
-                pass
-
-        file_size = os.path.getsize(local_file_path)
-        base_f = open(local_file_path, 'rb')
-        wrapped = UploadProgressReader(base_f, file_size)
-        stop_event = asyncio.Event()
-
-        async def _upload_progress_updater_audio():
-            last = 0.0
-            while not stop_event.is_set():
+            async def _on_progress(downloaded: int, total: Optional[int], speed: Optional[float], eta: Optional[float]):
                 try:
-                    now = time.monotonic()
-                    if now - last >= 1.0:
-                        read = wrapped.bytes_read
-                        percent = (read / file_size * 100.0) if file_size else 0.0
+                    if total and total > 0:
+                        percent = (downloaded / total) * 100.0
                         bar = _progress_bar(percent)
-                        elapsed = max(0.001, now - wrapped.start_time)
-                        speed = int(read / elapsed)
-                        eta = (file_size - read) / speed if speed > 0 else None
                         text = (
-                            "📤 Uploading audio...\n"
+                            "🎵 Downloading audio...\n"
                             f"{bar}\n"
-                            f"{_format_size(read)} / {_format_size(file_size)}\n"
-                            f"⚡ {_format_size(speed)}/s | ⏳ {_format_eta(eta)}"
+                            f"{_format_size(downloaded)} / { _format_size(total) }\n"
+                            f"⚡ {_format_size(int(speed or 0))}/s | ⏳ {_format_eta(eta)}"
                         )
-                        await status_message.edit_text(text)
-                        last = now
+                    else:
+                        text = (
+                            "🎵 Downloading audio...\n"
+                            f"{_format_size(downloaded)} downloaded\n"
+                            f"⚡ {_format_size(int(speed or 0))}/s"
+                        )
+                    await status_message.edit_text(text)
                 except Exception:
                     pass
-                await asyncio.sleep(0.5)
 
-        upload_start = time.monotonic()
-        updater_task = asyncio.create_task(_upload_progress_updater_audio())
-        try:
-            await message.reply_audio(
-                audio=wrapped,
-                read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                **kwargs,
+            download_start = time.monotonic()
+            success, info_message, local_file_path, metadata = await file_service.download_audio(url, progress_callback=_on_progress)
+            download_duration = time.monotonic() - download_start
+
+            if not success:
+                extra = f"\n⏱️ Download: {download_duration:.2f}s" if download_duration is not None else ""
+                await status_message.edit_text(f"{info_message}{extra}")
+                return
+
+            if local_file_path is None:
+                await status_message.edit_text("❌ Audio file is not available after download.")
+                return
+
+            await status_message.edit_text("📤 Uploading audio...")
+
+            kwargs = {}
+            title = metadata.get("title") if metadata else None
+            if title:
+                kwargs["title"] = title
+            duration_value = metadata.get("duration") if metadata else None
+            if duration_value:
+                try:
+                    kwargs["duration"] = int(float(duration_value))
+                except (TypeError, ValueError):
+                    pass
+
+            file_size = os.path.getsize(local_file_path)
+            base_f = open(local_file_path, 'rb')
+            wrapped = UploadProgressReader(base_f, file_size)
+            stop_event = asyncio.Event()
+
+            async def _upload_progress_updater_audio():
+                last = 0.0
+                while not stop_event.is_set():
+                    try:
+                        now = time.monotonic()
+                        if now - last >= 1.0:
+                            read = wrapped.bytes_read
+                            percent = (read / file_size * 100.0) if file_size else 0.0
+                            bar = _progress_bar(percent)
+                            elapsed = max(0.001, now - wrapped.start_time)
+                            speed = int(read / elapsed)
+                            eta = (file_size - read) / speed if speed > 0 else None
+                            text = (
+                                "📤 Uploading audio...\n"
+                                f"{bar}\n"
+                                f"{_format_size(read)} / {_format_size(file_size)}\n"
+                                f"⚡ {_format_size(speed)}/s | ⏳ {_format_eta(eta)}"
+                            )
+                            await status_message.edit_text(text)
+                            last = now
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.5)
+
+            upload_start = time.monotonic()
+            updater_task = asyncio.create_task(_upload_progress_updater_audio())
+            try:
+                await message.reply_audio(
+                    audio=wrapped,
+                    read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                    write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                    **kwargs,
+                )
+            finally:
+                stop_event.set()
+                try:
+                    await updater_task
+                except Exception:
+                    pass
+                try:
+                    base_f.close()
+                except Exception:
+                    pass
+            upload_duration = time.monotonic() - upload_start
+
+            display_name = title or local_file_path.split('/')[-1]
+            await status_message.edit_text(
+                "✅ Music sent successfully!\n"
+                f"🎶 {display_name}\n"
+                f"⏱️ Download: {download_duration:.2f}s\n"
+                f"📤 Upload: {upload_duration:.2f}s"
             )
+            logger.info(f"Music command successful for {display_name} in group {chat.id}")
+
+        except Exception as e:
+            logger.error(f"Error in music command: {e}", exc_info=True)
+            extra_parts = []
+            if download_duration is not None:
+                extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
+            if upload_duration is not None:
+                extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
+            extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
+            await status_message.edit_text(f"❌ There is an error: {str(e)}{extras}")
         finally:
-            stop_event.set()
-            try:
-                await updater_task
-            except Exception:
-                pass
-            try:
-                base_f.close()
-            except Exception:
-                pass
-        upload_duration = time.monotonic() - upload_start
+            if local_file_path:
+                file_service.cleanup_file(local_file_path)
 
-        display_name = title or local_file_path.split('/')[-1]
-        await status_message.edit_text(
-            "✅ Music sent successfully!\n"
-            f"🎶 {display_name}\n"
-            f"⏱️ Download: {download_duration:.2f}s\n"
-            f"📤 Upload: {upload_duration:.2f}s"
-        )
-        logger.info(f"Music command successful for {display_name} in group {chat.id}")
-
-    except Exception as e:
-        logger.error(f"Error in music command: {e}", exc_info=True)
-        extra_parts = []
-        if download_duration is not None:
-            extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
-        if upload_duration is not None:
-            extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
-        extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
-        await status_message.edit_text(f"❌ There is an error: {str(e)}{extras}")
-
-    finally:
-        if local_file_path:
-            file_service.cleanup_file(local_file_path)
+    context.application.create_task(_runner())
+    return
 
 
 async def image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

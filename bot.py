@@ -29,7 +29,7 @@ def main():
         logger.error("TELEGRAM_TOKEN not found in environment")
         return
 
-    builder = Application.builder().token(TELEGRAM_TOKEN)
+    builder = Application.builder().token(TELEGRAM_TOKEN).concurrent_updates(True)
     if TELEGRAM_API_BASE_URL:
         request = HTTPXRequest(base_url=TELEGRAM_API_BASE_URL)
         builder = builder.request(request)
