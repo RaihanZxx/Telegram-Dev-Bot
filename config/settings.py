@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Telegram Configuration
+TELEGRAM_UPLOAD_TIMEOUT = 24 * 60 * 60  # 24 hours
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TELEGRAM_TOKEN:
     raise ValueError("TELEGRAM_TOKEN is required in .env file")
@@ -31,21 +32,16 @@ AI_SYSTEM_PROMPT = (
     "NEVER use thinking tags like <think> or internal reasoning markers in your responses."
 )
 
-# Flask Health Check Server
-FLASK_PORT = int(os.getenv("PORT", 8080))
-FLASK_HOST = "0.0.0.0"
+# Server settings (no web server required for polling)
 
 # Rate Limiting (per user)
 RATE_LIMIT_MESSAGES = 10  # messages
 RATE_LIMIT_WINDOW = 60  # seconds
 
 # File Download Configuration
-TEMP_DIR = "/tmp"
+TEMP_DIR = "/home/han/Telegram-Dev-Bot/Files"
 MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
 DOWNLOAD_TIMEOUT = 24 * 60 * 60  # 24 hours
-
-# Telegram upload timeout
-TELEGRAM_UPLOAD_TIMEOUT = 24 * 60 * 60  # 24 hours
 
 # Optional YouTube cookies file path for yt-dlp
 YT_COOKIES_FILE = os.getenv("YT_COOKIES_FILE")

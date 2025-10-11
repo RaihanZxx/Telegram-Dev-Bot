@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: Telegram-Dev-Bot
-    runtime: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python bot.py
-    packages:
-      - ffmpeg
