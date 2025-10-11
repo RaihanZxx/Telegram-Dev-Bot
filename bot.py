@@ -4,8 +4,9 @@ Telegram Developer Assistant Bot
 A professional bot for helping developers in Telegram groups.
 """
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.request import HTTPXRequest
 
-from config.settings import TELEGRAM_TOKEN
+from config.settings import TELEGRAM_TOKEN, TELEGRAM_API_BASE_URL
 from handlers.command_handlers import (
     start_command,
     help_command,
@@ -28,7 +29,11 @@ def main():
         logger.error("TELEGRAM_TOKEN not found in environment")
         return
 
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    builder = Application.builder().token(TELEGRAM_TOKEN)
+    if TELEGRAM_API_BASE_URL:
+        request = HTTPXRequest(base_url=TELEGRAM_API_BASE_URL)
+        builder = builder.request(request)
+    application = builder.build()
 
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))

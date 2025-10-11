@@ -10,6 +10,10 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TELEGRAM_TOKEN:
     raise ValueError("TELEGRAM_TOKEN is required in .env file")
 
+# Optional: base URL for a self-hosted Telegram Bot API server (must end with "/bot")
+# Example: http://127.0.0.1:8081/bot
+TELEGRAM_API_BASE_URL = os.getenv("TELEGRAM_API_BASE_URL")
+
 # AI Service Configuration
 BYTEZ_API_KEY = os.getenv("BYTEZ_API_KEY")
 if not BYTEZ_API_KEY:

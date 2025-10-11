@@ -6,7 +6,7 @@ from math import log2
 from typing import Optional
 
 from telegram import Update
-from telegram.error import TimedOut, TelegramError
+from telegram.error import TimedOut, TelegramError, NetworkError
 from config.settings import TELEGRAM_UPLOAD_TIMEOUT
 from telegram.ext import ContextTypes
 from middleware.group_filter import group_only_filter
@@ -273,11 +273,30 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         upload_start = time.monotonic()
         updater_task = asyncio.create_task(_upload_progress_updater())
         try:
-            await message.reply_document(
-                document=wrapped,
-                read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-            )
+            try:
+                await message.reply_document(
+                    document=wrapped,
+                    read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                    write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                )
+            except NetworkError as ne:
+                # Fallback for proxies/self-hosted Bot API that reject large multipart uploads (HTTP 413)
+                if "Request Entity Too Large" in str(ne):
+                    logger.warning("Upload rejected with 413. Falling back to Telegram fetch-by-URL.")
+                    try:
+                        await status_message.edit_text(
+                            f"⚠️ Upload too large for direct send. Trying via URL fetch...\n📎 {filename}"
+                        )
+                    except Exception:
+                        pass
+                    # Let Telegram servers fetch the file from the original URL
+                    await message.reply_document(
+                        document=url,
+                        read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                        write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                    )
+                else:
+                    raise
         finally:
             stop_event.set()
             try:
