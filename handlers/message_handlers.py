@@ -227,16 +227,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pts_wrong = {"easy": 12.5, "medium": 25.0, "hard": 50.0}.get(pending.difficulty, 0.0)
             pts_right = {"easy": 25.0, "medium": 50.0, "hard": 100.0}.get(pending.difficulty, 0.0)
             awarded = pts_right if is_correct else pts_wrong
-            total = challenge_manager.add_points(group_id, user_id, awarded)
+            display_name = f"@{user.username}" if user.username else user.first_name
+            total = challenge_manager.add_points(group_id, user_id, awarded, display_name=display_name)
 
             # Build leaderboard text
-            top = challenge_manager.leaderboard(group_id, limit=10)
+            top = challenge_manager.leaderboard_with_names(group_id, limit=10)
             lb_lines = []
             rank = 1
-            for uid, score in top:
-                label = f"ID {uid}"
-                if uid == user_id and (user.username or user.first_name):
-                    label = f"@{user.username}" if user.username else user.first_name
+            for label, score in top:
                 lb_lines.append(f"{rank}. {label} — {score:.1f} pts")
                 rank += 1
             leaderboard_text = "\n".join(lb_lines) if lb_lines else "(no entries yet)"

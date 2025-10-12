@@ -139,3 +139,25 @@ async def challenge_diff_callback(update: Update, context: ContextTypes.DEFAULT_
             prompt=content,
         ),
     )
+
+
+async def ranking_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Display the /challenge leaderboard for the current chat"""
+    if not await group_only_filter(update, context):
+        return
+
+    message = update.message
+    chat = update.effective_chat
+    if not message or not chat:
+        return
+
+    top = challenge_manager.leaderboard_with_names(chat.id, limit=10)
+    if not top:
+        await reply_text_safe(message, "🏆 /challenge Leaderboard\n(no entries yet)")
+        return
+
+    lines = ["🏆 /challenge Leaderboard"]
+    for idx, (name, pts) in enumerate(top, start=1):
+        lines.append(f"{idx}. {name} — {pts:.1f} pts")
+    text = "\n".join(lines)
+    await reply_text_safe(message, text)

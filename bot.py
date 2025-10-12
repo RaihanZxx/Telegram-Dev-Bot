@@ -22,6 +22,7 @@ from handlers.challenge_handlers import (
     challenge_command,
     challenge_lang_callback,
     challenge_diff_callback,
+    ranking_command,
 )
 from utils.logger import setup_logger
 
@@ -52,6 +53,8 @@ def main():
     application.add_handler(CommandHandler("image", image_command))
     application.add_handler(CommandHandler("whitelist", whitelist_command))
     application.add_handler(CommandHandler("challenge", challenge_command))
+    application.add_handler(CommandHandler("rangking", ranking_command))
+    application.add_handler(CommandHandler("ranking", ranking_command))
     application.add_handler(CallbackQueryHandler(challenge_lang_callback, pattern=r"^challenge_lang:"))
     application.add_handler(CallbackQueryHandler(challenge_diff_callback, pattern=r"^challenge_diff:"))
 
