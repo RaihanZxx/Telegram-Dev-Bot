@@ -342,41 +342,33 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             updater_task = asyncio.create_task(_upload_progress_updater())
             try:
                 try:
+                    send_kwargs = dict(
+                        chat_id=chat_id,
+                        document=wrapped,
+                        read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                        write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                    )
                     if topic_id:
-                        await send_document_safe(
-                            context.bot,
-                            chat_id=chat_id,
-                            document=wrapped,
-                            message_thread_id=topic_id,
-                            read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                            write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                        )
-                    else:
-                        await reply_document_safe(
-                            message,
-                            document=wrapped,
-                            read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                            write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                        )
+                        send_kwargs["message_thread_id"] = topic_id
+                    await send_document_safe(
+                        context.bot,
+                        **send_kwargs,
+                    )
                 except NetworkError as ne:
                     if "Request Entity Too Large" in str(ne):
                         logger.warning("Upload rejected with 413. Falling back to Telegram fetch-by-URL.")
+                        fallback_kwargs = dict(
+                            chat_id=chat_id,
+                            document=url,
+                            read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                            write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                        )
                         if topic_id:
-                            await send_document_safe(
-                                context.bot,
-                                chat_id=chat_id,
-                                document=url,
-                                message_thread_id=topic_id,
-                                read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                                write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                            )
-                        else:
-                            await reply_document_safe(
-                                message,
-                                document=url,
-                                read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                                write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                            )
+                            fallback_kwargs["message_thread_id"] = topic_id
+                        await send_document_safe(
+                            context.bot,
+                            **fallback_kwargs,
+                        )
                     else:
                         raise
             finally:
@@ -594,24 +586,19 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             upload_start = time.monotonic()
             updater_task = asyncio.create_task(_upload_progress_updater_audio())
             try:
+                send_kwargs = dict(
+                    chat_id=chat.id,
+                    audio=wrapped,
+                    read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                    write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                    **kwargs,
+                )
                 if topic_id:
-                    await send_audio_safe(
-                        context.bot,
-                        chat_id=chat.id,
-                        audio=wrapped,
-                        message_thread_id=topic_id,
-                        read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                        write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                        **kwargs,
-                    )
-                else:
-                    await reply_audio_safe(
-                        message,
-                        audio=wrapped,
-                        read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                        write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                        **kwargs,
-                    )
+                    send_kwargs["message_thread_id"] = topic_id
+                await send_audio_safe(
+                    context.bot,
+                    **send_kwargs,
+                )
             finally:
                 stop_event.set()
                 try:
