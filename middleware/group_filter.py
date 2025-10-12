@@ -4,6 +4,11 @@ from telegram.ext import ContextTypes
 from utils.logger import setup_logger
 from config.settings import GROUP_ONLY
 from utils.whitelist import is_whitelisted
+import time
+
+# Track groups we've already notified to avoid repeated permission messages
+_notified_groups: dict[int, float] = {}
+_notify_ttl_sec = 3600  # re-notify at most once per hour
 
 logger = setup_logger(__name__)
 
@@ -45,10 +50,18 @@ async def group_only_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     
     # Enforce whitelist for groups
     if not await is_whitelisted(chat.id):
-        if update.message:
-            await update.message.reply_text(
-                "contact @hansobored for permission using bot"
-            )
+        # Avoid self-trigger loops: don't notify on bot's own messages
+        if update.effective_user and context.bot and update.effective_user.id == context.bot.id:
+            return False
+        # Notify only once per TTL window
+        now = time.time()
+        last = _notified_groups.get(chat.id)
+        if last is None or (now - last) > _notify_ttl_sec:
+            if update.message:
+                await update.message.reply_text(
+                    "contact @hansobored for permission using bot"
+                )
+            _notified_groups[chat.id] = now
         logger.warning("Blocked non-whitelisted group %s", chat.id)
         return False
 
