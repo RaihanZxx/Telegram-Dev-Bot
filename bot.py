@@ -12,6 +12,7 @@ from handlers.command_handlers import (
     clear_command,
     clear_db_command,
     mirror_command,
+    cancel_dl_command,
     music_command,
     image_command,
     whitelist_command,
@@ -40,6 +41,8 @@ def main():
     application.add_handler(CommandHandler("clear_db", clear_db_command))
     application.add_handler(MessageHandler(filters.Regex(r"^/clear-db(?:@\w+)?$"), clear_db_command))
     application.add_handler(CommandHandler("mirror", mirror_command))
+    application.add_handler(CommandHandler("cancel_dl", cancel_dl_command))
+    application.add_handler(MessageHandler(filters.Regex(r"^/cancel-dl(?:@\w+)?$"), cancel_dl_command))
     application.add_handler(CommandHandler("music", music_command))
     application.add_handler(CommandHandler("image", image_command))
     application.add_handler(CommandHandler("whitelist", whitelist_command))

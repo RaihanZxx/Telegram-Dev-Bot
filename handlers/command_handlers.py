@@ -22,6 +22,7 @@ from utils.telegram_safe import (
     reply_audio_safe,
 )
 from utils.whitelist import add_group, is_whitelisted
+from utils.download_tracker import download_tracker
 
 logger = setup_logger(__name__)
 
@@ -207,12 +208,14 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     message = update.message
     chat = update.effective_chat
+    user = update.effective_user
     if message is None or chat is None:
         logger.warning("Mirror command without message or chat context")
         return
 
     if not context.args:
         await reply_text_safe(
+            message,
             "❌ Please provide the file URL.\n"
             "Contoh: <code>/mirror https://example.com/file.zip</code>",
             parse_mode="HTML"
@@ -220,35 +223,48 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     url = context.args[0]
-    status_message = await reply_text_safe(message, "🔗 Starting download...")
 
-    async def _runner():
+    # Per-user concurrency limit (2)
+    user_id = user.id if user else 0
+    chat_id = chat.id
+    if not download_tracker.can_start(chat_id, user_id):
+        await reply_text_safe(message, "❌ Batas unduhan bersamaan per pengguna adalah 2. Selesaikan tugas aktif terlebih dahulu.")
+        return
+
+    # User/Group display strings
+    user_display = (f"@{user.username}" if user and user.username else (user.first_name if user else str(user_id)))
+    group_display = chat.title or str(chat_id)
+
+    tracker = await download_tracker.ensure_tracker(chat_id, user_id, user_display, group_display)
+    if tracker.message_id is None:
+        # Create a unified status message for this user's tasks in this group
+        banner = f"Task [{user_display}] Mirror.\nGroup [{group_display}]\nMenyiapkan tugas…"
+        banner_msg = await reply_text_safe(message, banner)
+        await download_tracker.set_message_id(tracker, banner_msg.message_id)
+
+    # Prepare filename & register task before scheduling
+    filename = url.split('/')[-1].split('?')[0] or "file"
+    task_meta = download_tracker.start_task(tracker, filename)
+
+    async def _runner(task_id: str):
         local_file_path = None
         download_duration = None
         upload_duration = None
         upload_start = None
         try:
-            filename = url.split('/')[-1].split('?')[0] or "file"
-            await edit_text_safe(status_message, f"📥 Downloading `{filename}`...")
+            task = type("T", (), {"id": task_id})
 
             async def _on_progress(downloaded: int, total: Optional[int], speed_bps: float):
                 try:
-                    if total and total > 0:
-                        percent = (downloaded / total) * 100.0
-                        bar = _progress_bar(percent)
-                        text = (
-                            f"📥 Downloading `{filename}`\n"
-                            f"{bar}\n"
-                            f"{_format_size(downloaded)} / { _format_size(total) }\n"
-                            f"⚡ {_format_size(int(speed_bps))}/s | ⏳ {_format_eta((total - downloaded) / speed_bps if speed_bps else None)}"
-                        )
-                    else:
-                        text = (
-                            f"📥 Downloading `{filename}`\n"
-                            f"{_format_size(downloaded)} downloaded\n"
-                            f"⚡ {_format_size(int(speed_bps))}/s"
-                        )
-                    await edit_text_safe(status_message, text)
+                    await download_tracker.update_task(
+                        context.bot,
+                        tracker,
+                        task.id,
+                        stage="download",
+                        downloaded=downloaded,
+                        total=total,
+                        speed_bps=speed_bps,
+                    )
                 except Exception:
                     pass
 
@@ -257,15 +273,12 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             download_duration = time.monotonic() - download_start
 
             if not success:
-                extra = f"\n⏱️ Download: {download_duration:.2f}s" if download_duration is not None else ""
-                await edit_text_safe(status_message, f"{status_text}{extra}")
+                await download_tracker.finish_task(context.bot, tracker, task.id, success=False)
                 return
 
             if local_file_path is None:
-                await edit_text_safe(status_message, "❌ File not available after download.")
+                await download_tracker.finish_task(context.bot, tracker, task.id, success=False)
                 return
-
-            await edit_text_safe(status_message, f"📤 Uploading `{filename}`...")
 
             file_size = os.path.getsize(local_file_path)
             base_f = open(local_file_path, 'rb')
@@ -280,17 +293,19 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         if now - last >= 1.0:
                             read = wrapped.bytes_read
                             percent = (read / file_size * 100.0) if file_size else 0.0
-                            bar = _progress_bar(percent)
                             elapsed = max(0.001, now - wrapped.start_time)
                             speed = int(read / elapsed)
                             eta = (file_size - read) / speed if speed > 0 else None
-                            text = (
-                                f"📤 Uploading `{filename}`\n"
-                                f"{bar}\n"
-                                f"{_format_size(read)} / {_format_size(file_size)}\n"
-                                f"⚡ {_format_size(speed)}/s | ⏳ {_format_eta(eta)}"
+                            _ = eta  # not used in minimalist view
+                            await download_tracker.update_task(
+                                context.bot,
+                                tracker,
+                                task.id,
+                                stage="upload",
+                                downloaded=read,
+                                total=file_size,
+                                speed_bps=float(speed),
                             )
-                            await status_message.edit_text(text)
                             last = now
                     except Exception:
                         pass
@@ -309,12 +324,6 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except NetworkError as ne:
                     if "Request Entity Too Large" in str(ne):
                         logger.warning("Upload rejected with 413. Falling back to Telegram fetch-by-URL.")
-                        try:
-                            await edit_text_safe(
-                                f"⚠️ Upload too large for direct send. Trying via URL fetch...\n📎 {filename}"
-                            )
-                        except Exception:
-                            pass
                         await reply_document_safe(
                             message,
                             document=url,
@@ -335,75 +344,64 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
             upload_duration = time.monotonic() - upload_start
 
-            success_text = (
-                "✅ Finished!\n"
-                f"📄 {filename}\n"
-                f"⏱️ Download: {download_duration:.2f}s\n"
-                f"📤 Upload: {upload_duration:.2f}s"
-            )
-            try:
-                await edit_text_safe(status_message, success_text)
-            except (TimedOut, asyncio.TimeoutError) as edit_error:
-                logger.warning(f"Status message update timed out: {edit_error}")
-            except TelegramError as edit_error:
-                logger.warning(f"Status message update failed: {edit_error}")
+            await download_tracker.finish_task(context.bot, tracker, task.id, success=True)
             logger.info(f"Mirror successful for {filename} in group {chat.id}")
+
+        except asyncio.CancelledError:
+            # user-triggered cancellation
+            try:
+                await download_tracker.finish_task(context.bot, tracker, task_id, success=False)
+            finally:
+                raise
 
         except TimedOut as e:
             logger.error(f"Upload timed out for mirror command: {e}", exc_info=True)
             if upload_start is not None:
                 upload_duration = time.monotonic() - upload_start
-            extra_parts = []
-            if download_duration is not None:
-                extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
-            if upload_duration is not None:
-                extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
-            extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
-            try:
-                await edit_text_safe(
-                    "❌ An error occurred: Uploading to Telegram exceeded the time limit.."
-                    " Please try again in a few moments." + extras
-                )
-            except (TimedOut, asyncio.TimeoutError) as edit_error:
-                logger.warning(f"Status message update timed out after upload timeout: {edit_error}")
-            except TelegramError as edit_error:
-                logger.warning(f"Status message update failed after upload timeout: {edit_error}")
+            await download_tracker.finish_task(context.bot, tracker, task.id, success=False)
             return
         except asyncio.TimeoutError as e:
             logger.error(f"Async operation timed out for mirror command: {e}", exc_info=True)
             if upload_start is not None:
                 upload_duration = time.monotonic() - upload_start
-            extra_parts = []
-            if download_duration is not None:
-                extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
-            if upload_duration is not None:
-                extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
-            extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
-            try:
-                await edit_text_safe(
-                    "❌ An error occurred: Uploading to Telegram exceeded the time limit."
-                    " Please try again in a few moments." + extras
-                )
-            except (TimedOut, asyncio.TimeoutError) as edit_error:
-                logger.warning(f"Status message update timed out after async timeout: {edit_error}")
-            except TelegramError as edit_error:
-                logger.warning(f"Status message update failed after async timeout: {edit_error}")
+            await download_tracker.finish_task(context.bot, tracker, task.id, success=False)
             return
         except Exception as e:
             logger.error(f"Error in mirror command: {e}", exc_info=True)
-            extra_parts = []
-            if download_duration is not None:
-                extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
-            if upload_duration is not None:
-                extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
-            extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
-            await edit_text_safe(status_message, f"❌ There is an error: {str(e)}{extras}")
+            await download_tracker.finish_task(context.bot, tracker, task.id, success=False)
         finally:
             if local_file_path:
                 file_service.cleanup_file(local_file_path)
 
-    context.application.create_task(_runner())
+    handle = context.application.create_task(_runner(task_meta.id))
+    download_tracker.bind_handle(tracker, task_meta.id, handle)
     return
+
+
+async def cancel_dl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel all active download/upload tasks for the requesting user in this group."""
+    if not await group_only_filter(update, context):
+        return
+
+    message = update.message
+    chat = update.effective_chat
+    user = update.effective_user
+    if not message or not chat or not user:
+        return
+
+    chat_id = chat.id
+    user_id = user.id
+    user_display = (f"@{user.username}" if user.username else user.first_name)
+    group_display = chat.title or str(chat_id)
+
+    tracker = await download_tracker.ensure_tracker(chat_id, user_id, user_display, group_display)
+    active = [t for t in tracker.tasks.values() if t.stage not in ("done", "error")]
+    if not active:
+        await reply_text_safe(message, "ℹ️ Tidak ada tugas unduhan aktif untuk dibatalkan.")
+        return
+
+    await download_tracker.cancel_all(context.bot, tracker)
+    await reply_text_safe(message, "🛑 Tugas unduhan Anda telah dibatalkan.")
 
 
 async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

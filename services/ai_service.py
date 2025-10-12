@@ -54,10 +54,17 @@ class AIService:
                 # Add current user message
                 messages.append({"role": "user", "content": user_message})
                 
-                headers: Dict[str, str] = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                }
+                def _headers(style: str) -> Dict[str, str]:
+                    if style == "raw":
+                        return {
+                            "Authorization": self.api_key,
+                            "Content-Type": "application/json",
+                        }
+                    else:
+                        return {
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        }
 
                 payload = {
                     "messages": messages,
@@ -68,9 +75,10 @@ class AIService:
                     },
                 }
 
+                # First try with raw Authorization header (matches image_service)
                 response = await client.post(
                     url=self.api_url,
-                    headers=headers,
+                    headers=_headers("raw"),
                     json=payload,
                 )
                 
@@ -78,7 +86,18 @@ class AIService:
                 try:
                     response.raise_for_status()
                 except httpx.HTTPStatusError as first_err:
-                    if first_err.response.status_code == 422:
+                    if first_err.response.status_code == 401:
+                        # Retry once with Bearer token style
+                        logger.info("AI API 401 with raw auth: retrying with Bearer token")
+                        retry = await client.post(
+                            url=self.api_url,
+                            headers=_headers("bearer"),
+                            json=payload,
+                        )
+                        logger.info(f"Bearer retry status: {retry.status_code}")
+                        retry.raise_for_status()
+                        data = retry.json()
+                    elif first_err.response.status_code == 422:
                         # Fallback: try alternative param naming schema
                         logger.info("AI API 422: retrying with max_tokens schema")
                         alt_payload = {
@@ -89,7 +108,7 @@ class AIService:
                         }
                         alt = await client.post(
                             url=self.api_url,
-                            headers=headers,
+                            headers=_headers("raw"),
                             json=alt_payload,
                         )
                         logger.info(f"Received alt response, status: {alt.status_code}")
