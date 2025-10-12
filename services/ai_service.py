@@ -63,14 +63,12 @@ class AIService:
                         "Content-Type": "application/json",
                     }
 
-                # Primary schema: input + params.max_tokens/temperature
+                # Primary schema: input + top-level max_tokens/temperature (observed working)
                 payload = {
                     "input": prompt,
                     "stream": False,
-                    "params": {
-                        "max_tokens": AI_MAX_LENGTH,
-                        "temperature": AI_TEMPERATURE,
-                    },
+                    "max_tokens": AI_MAX_LENGTH,
+                    "temperature": AI_TEMPERATURE,
                 }
 
                 # First try with raw Authorization header (matches image_service)
@@ -96,13 +94,15 @@ class AIService:
                         retry.raise_for_status()
                         data = retry.json()
                     elif first_err.response.status_code == 422:
-                        # Fallback: try top-level params (some deployments expect flat schema)
-                        logger.info("AI API 422: retrying with top-level max_tokens schema")
+                        # Fallback: try params schema
+                        logger.info("AI API 422: retrying with params schema")
                         alt_payload = {
                             "input": prompt,
                             "stream": False,
-                            "max_tokens": AI_MAX_LENGTH,
-                            "temperature": AI_TEMPERATURE,
+                            "params": {
+                                "max_tokens": AI_MAX_LENGTH,
+                                "temperature": AI_TEMPERATURE,
+                            },
                         }
                         alt = await client.post(
                             url=self.api_url,
@@ -117,14 +117,55 @@ class AIService:
                 else:
                     data = response.json()
                 
-                # Extract content from response
-                output = data.get('output', '')
-                if isinstance(output, dict) and 'content' in output:
-                    content = output['content']
-                elif isinstance(output, str):
-                    content = output
-                else:
-                    content = str(output)
+                # Extract content from response (robust across formats)
+                def _get_first_text(obj) -> str:
+                    if obj is None:
+                        return ""
+                    if isinstance(obj, str):
+                        return obj
+                    if isinstance(obj, dict):
+                        for k in (
+                            "content",
+                            "text",
+                            "message",
+                            "output",
+                            "response",
+                            "result",
+                            "generated_text",
+                        ): 
+                            v = obj.get(k)
+                            s = _get_first_text(v)
+                            if s:
+                                return s
+                        # OpenAI-like choices
+                        choices = obj.get("choices")
+                        if isinstance(choices, list) and choices:
+                            ch0 = choices[0]
+                            if isinstance(ch0, dict):
+                                msg = ch0.get("message") or {}
+                                s = _get_first_text(msg)
+                                if s:
+                                    return s
+                                s = _get_first_text(ch0.get("text"))
+                                if s:
+                                    return s
+                        # nested data
+                        data_field = obj.get("data")
+                        s = _get_first_text(data_field)
+                        if s:
+                            return s
+                        return ""
+                    if isinstance(obj, (list, tuple)):
+                        for it in obj:
+                            s = _get_first_text(it)
+                            if s:
+                                return s
+                        return ""
+                    return ""
+
+                content = _get_first_text(data)
+                if not content:
+                    logger.debug("AI response body keys: %s", list(data.keys()) if isinstance(data, dict) else type(data))
                 
                 # Clean and sanitize response to avoid leaking prompt/roles
                 content = clean_ai_response(content)
