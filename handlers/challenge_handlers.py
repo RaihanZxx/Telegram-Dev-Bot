@@ -48,7 +48,7 @@ async def challenge_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await reply_text_safe(
         message,
-        "Pilih bahasa pemrograman untuk tantangan:",
+        "Choose a programming language for the challenge:",
         reply_markup=markup,
     )
 
@@ -74,9 +74,9 @@ async def challenge_lang_callback(update: Update, context: ContextTypes.DEFAULT_
     ]
     markup = InlineKeyboardMarkup(kb)
     try:
-        await edit_text_safe(q.message, f"Bahasa dipilih: {lang}.\nPilih tingkat kesulitan:", reply_markup=markup)
+        await edit_text_safe(q.message, f"Language selected: {lang}.\nChoose difficulty:", reply_markup=markup)
     except Exception:
-        await reply_text_safe(q.message, f"Bahasa dipilih: {lang}.\nPilih tingkat kesulitan:", reply_markup=markup)
+        await reply_text_safe(q.message, f"Language selected: {lang}.\nChoose difficulty:", reply_markup=markup)
     await q.answer()
 
 
@@ -102,26 +102,26 @@ async def challenge_diff_callback(update: Update, context: ContextTypes.DEFAULT_
 
     # Acknowledge selection and generate challenge
     try:
-        await edit_text_safe(q.message, f"Bahasa: {lang}\nKesulitan: {diff}\nMembuat tantangan…")
+        await edit_text_safe(q.message, f"Language: {lang}\nDifficulty: {diff}\nGenerating challenge…")
     except Exception:
         pass
 
     gen_prompt = (
-        "Buatkan sebuah tantangan pemrograman bahasa {lang} tingkat {diff}. "
-        "Berikan deskripsi masalah yang jelas, kriteria keberhasilan, dan 1-2 contoh input/output. "
-        "JANGAN sertakan solusi. Tulis singkat dan rapi."
+        "Create a {diff}-level programming challenge in {lang}. "
+        "Provide a clear problem statement, success criteria, and 1-2 input/output examples. "
+        "Do NOT include the solution. Keep it concise and tidy."
     ).format(lang=lang, diff=diff)
 
     try:
         content = await ai_service.get_response(gen_prompt)
     except Exception as e:  # noqa: BLE001
         logger.error("Failed to get challenge from AI: %s", e, exc_info=True)
-        content = "❌ Gagal membuat tantangan. Coba lagi nanti."
+        content = "❌ Failed to generate a challenge. Please try again later."
 
     # Inform user to reply to this message with the answer
     tail = (
-        "\n\nBalas pesan ini dengan jawaban/solusimu. "
-        "Bot akan menilai jawabanmu."
+        "\n\nReply to this message with your answer/solution. "
+        "The bot will evaluate your submission."
     )
     challenge_text = f"{content}{tail}"
 

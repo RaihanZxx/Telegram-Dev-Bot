@@ -203,25 +203,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Rate limit check
             allowed, wait_time = rate_limiter.is_allowed(user_id)
             if not allowed:
-                await message.reply_text(
-                    f"⏳ You sent the message too quickly. Try again in {wait_time} second."
-                )
+                await message.reply_text(f"⏳ You sent messages too quickly. Try again in {wait_time} second(s).")
                 return
 
-            thinking = await reply_text_safe(message, "🧪 Menilai jawaban…")
+            thinking = await reply_text_safe(message, "🧪 Evaluating your answer…")
 
             eval_prompt = (
-                "Anda adalah penguji otomatis. Nilai jawaban berikut untuk tantangan {lang} tingkat {diff}.\n\n"
-                "[TANTANGAN]\n{challenge}\n\n[SUBMISSION]\n{answer}\n\n"
-                "Kembalikan satu baris pertama persis: 'VERDICT: CORRECT' atau 'VERDICT: INCORRECT'.\n"
-                "Lalu beri penjelasan singkat 1 paragraf."
+                "You are an automatic judge. Evaluate the following answer for a {diff}-level {lang} challenge.\n\n"
+                "[CHALLENGE]\n{challenge}\n\n[SUBMISSION]\n{answer}\n\n"
+                "Return the first line exactly as either 'VERDICT: CORRECT' or 'VERDICT: INCORRECT'.\n"
+                "Then provide a brief 1-paragraph explanation."
             ).format(lang=pending.language, diff=pending.difficulty, challenge=pending.prompt, answer=user_message)
 
             try:
                 eval_resp = await ai_service.get_response(eval_prompt)
             except Exception as e:  # noqa: BLE001
                 logger.error("Evaluation error: %s", e, exc_info=True)
-                eval_resp = "VERDICT: INCORRECT\nPenilaian gagal, coba lagi."\
+                eval_resp = "VERDICT: INCORRECT\nEvaluation failed, please try again."
 
             verdict_line = (eval_resp or "").splitlines()[0].strip().upper()
             is_correct = "CORRECT" in verdict_line and "INCORRECT" not in verdict_line
@@ -241,12 +239,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     label = f"@{user.username}" if user.username else user.first_name
                 lb_lines.append(f"{rank}. {label} — {score:.1f} pts")
                 rank += 1
-            leaderboard_text = "\n".join(lb_lines) if lb_lines else "(belum ada)"
+            leaderboard_text = "\n".join(lb_lines) if lb_lines else "(no entries yet)"
 
             result_text = (
                 f"{eval_resp}\n\n"
-                f"Poin: +{awarded:.1f} (total {total:.1f})\n\n"
-                f"🏆 Leaderboard /challenge:\n{leaderboard_text}"
+                f"Points: +{awarded:.1f} (total {total:.1f})\n\n"
+                f"🏆 /challenge Leaderboard:\n{leaderboard_text}"
             )
 
             formatted = format_telegram_markdown(result_text)
