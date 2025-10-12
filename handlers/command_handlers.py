@@ -22,6 +22,7 @@ from utils.telegram_safe import (
     reply_audio_safe,
     send_document_safe,
     send_audio_safe,
+    delete_message_safe,
 )
 from utils.whitelist import add_group, is_whitelisted
 from utils.download_tracker import download_tracker
@@ -421,6 +422,11 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     handle = context.application.create_task(_runner(task_meta.id))
     download_tracker.bind_handle(tracker, task_meta.id, handle)
+    # Auto-delete the command message to keep chat clean
+    try:
+        await delete_message_safe(message)
+    except Exception:
+        pass
     return
 
 
@@ -444,10 +450,20 @@ async def cancel_dl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     active = [t for t in tracker.tasks.values() if t.stage not in ("done", "error")]
     if not active:
         await reply_text_safe(message, "ℹ️ Tidak ada tugas unduhan aktif untuk dibatalkan.")
+        # Delete the command message to keep chat clean
+        try:
+            await delete_message_safe(message)
+        except Exception:
+            pass
         return
 
     await download_tracker.cancel_all(context.bot, tracker)
     await reply_text_safe(message, "🛑 Tugas unduhan Anda telah dibatalkan.")
+    # Delete the command message to keep chat clean
+    try:
+        await delete_message_safe(message)
+    except Exception:
+        pass
 
 
 async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -618,6 +634,11 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 file_service.cleanup_file(local_file_path)
 
     context.application.create_task(_runner())
+    # Auto-delete the command message to keep chat clean
+    try:
+        await delete_message_safe(message)
+    except Exception:
+        pass
     return
 
 

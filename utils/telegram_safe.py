@@ -161,3 +161,18 @@ async def send_audio_safe(
             max_retries=max_retries,
             **kwargs,
         )
+
+
+async def delete_message_safe(
+    message: Message,
+    *,
+    max_retries: int = 4,
+):
+    """Safely delete a message with retry and per-chat lock."""
+    chat_id = message.chat.id
+    lock = _get_lock(chat_id)
+    async with lock:
+        return await _with_retry(
+            message.delete,
+            max_retries=max_retries,
+        )
