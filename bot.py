@@ -3,7 +3,7 @@
 Telegram Developer Assistant Bot
 A professional bot for helping developers in Telegram groups.
 """
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
 from config.settings import TELEGRAM_TOKEN, TELEGRAM_API_BASE_URL
 from handlers.command_handlers import (
@@ -18,6 +18,11 @@ from handlers.command_handlers import (
     whitelist_command,
 )
 from handlers.message_handlers import handle_message
+from handlers.challenge_handlers import (
+    challenge_command,
+    challenge_lang_callback,
+    challenge_diff_callback,
+)
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -46,6 +51,9 @@ def main():
     application.add_handler(CommandHandler("music", music_command))
     application.add_handler(CommandHandler("image", image_command))
     application.add_handler(CommandHandler("whitelist", whitelist_command))
+    application.add_handler(CommandHandler("challenge", challenge_command))
+    application.add_handler(CallbackQueryHandler(challenge_lang_callback, pattern=r"^challenge_lang:"))
+    application.add_handler(CallbackQueryHandler(challenge_diff_callback, pattern=r"^challenge_diff:"))
 
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
@@ -55,7 +63,7 @@ def main():
     logger.info("Bot is now polling for updates...")
 
     application.run_polling(
-        allowed_updates=["message"],
+        allowed_updates=["message", "callback_query"],
         drop_pending_updates=True,
     )
 

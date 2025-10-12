@@ -57,6 +57,7 @@ async def edit_text_safe(
     *,
     parse_mode: Optional[ParseMode | str] = None,
     max_retries: int = 4,
+    **kwargs,
 ):
     chat_id = message.chat.id
     lock = _get_lock(chat_id)
@@ -66,6 +67,7 @@ async def edit_text_safe(
             text,
             parse_mode=parse_mode,
             max_retries=max_retries,
+            **kwargs,
         )
 
 
@@ -75,6 +77,7 @@ async def reply_text_safe(
     *,
     parse_mode: Optional[ParseMode | str] = None,
     max_retries: int = 4,
+    **kwargs,
 ):
     chat_id = message.chat.id
     lock = _get_lock(chat_id)
@@ -84,6 +87,7 @@ async def reply_text_safe(
             text,
             parse_mode=parse_mode,
             max_retries=max_retries,
+            **kwargs,
         )
 
 

@@ -16,6 +16,7 @@ from utils.telegram_safe import (
     edit_message_text_safe,
     reply_text_safe,
 )
+from utils.challenge_manager import challenge_manager
 
 logger = setup_logger(__name__)
 
@@ -194,6 +195,72 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = user.id
     group_id = chat.id
     user_message = message.text
+
+    # If this is a reply to a pending challenge, handle evaluation path first
+    if message.reply_to_message:
+        pending = challenge_manager.get_pending(message.reply_to_message.message_id)
+        if pending is not None:
+            # Rate limit check
+            allowed, wait_time = rate_limiter.is_allowed(user_id)
+            if not allowed:
+                await message.reply_text(
+                    f"⏳ You sent the message too quickly. Try again in {wait_time} second."
+                )
+                return
+
+            thinking = await reply_text_safe(message, "🧪 Menilai jawaban…")
+
+            eval_prompt = (
+                "Anda adalah penguji otomatis. Nilai jawaban berikut untuk tantangan {lang} tingkat {diff}.\n\n"
+                "[TANTANGAN]\n{challenge}\n\n[SUBMISSION]\n{answer}\n\n"
+                "Kembalikan satu baris pertama persis: 'VERDICT: CORRECT' atau 'VERDICT: INCORRECT'.\n"
+                "Lalu beri penjelasan singkat 1 paragraf."
+            ).format(lang=pending.language, diff=pending.difficulty, challenge=pending.prompt, answer=user_message)
+
+            try:
+                eval_resp = await ai_service.get_response(eval_prompt)
+            except Exception as e:  # noqa: BLE001
+                logger.error("Evaluation error: %s", e, exc_info=True)
+                eval_resp = "VERDICT: INCORRECT\nPenilaian gagal, coba lagi."\
+
+            verdict_line = (eval_resp or "").splitlines()[0].strip().upper()
+            is_correct = "CORRECT" in verdict_line and "INCORRECT" not in verdict_line
+
+            pts_wrong = {"easy": 12.5, "medium": 25.0, "hard": 50.0}.get(pending.difficulty, 0.0)
+            pts_right = {"easy": 25.0, "medium": 50.0, "hard": 100.0}.get(pending.difficulty, 0.0)
+            awarded = pts_right if is_correct else pts_wrong
+            total = challenge_manager.add_points(group_id, user_id, awarded)
+
+            # Build leaderboard text
+            top = challenge_manager.leaderboard(group_id, limit=10)
+            lb_lines = []
+            rank = 1
+            for uid, score in top:
+                label = f"ID {uid}"
+                if uid == user_id and (user.username or user.first_name):
+                    label = f"@{user.username}" if user.username else user.first_name
+                lb_lines.append(f"{rank}. {label} — {score:.1f} pts")
+                rank += 1
+            leaderboard_text = "\n".join(lb_lines) if lb_lines else "(belum ada)"
+
+            result_text = (
+                f"{eval_resp}\n\n"
+                f"Poin: +{awarded:.1f} (total {total:.1f})\n\n"
+                f"🏆 Leaderboard /challenge:\n{leaderboard_text}"
+            )
+
+            formatted = format_telegram_markdown(result_text)
+            await edit_message_text_safe(
+                context.bot,
+                chat.id,
+                thinking.message_id,
+                formatted,
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+
+            # Do not remove pending so others can also attempt; comment next line to allow multiple entries
+            # challenge_manager.remove_pending(message.reply_to_message.message_id)
+            return
     
     # Remove bot mention from message
     if bot_username:
