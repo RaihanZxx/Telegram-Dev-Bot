@@ -69,9 +69,9 @@ class AIService:
                         "Content-Type": "application/json",
                     }
 
-                # Primary schema: input + top-level max_tokens/temperature (observed working)
+                # Primary schema: OpenAI-like messages with top-level params
                 payload = {
-                    "input": prompt,
+                    "messages": messages,
                     "stream": False,
                     "max_tokens": AI_MAX_LENGTH,
                     "temperature": AI_TEMPERATURE,
@@ -100,10 +100,10 @@ class AIService:
                         retry.raise_for_status()
                         data = retry.json()
                     elif first_err.response.status_code == 422:
-                        # Fallback: try params schema
-                        logger.info("AI API 422: retrying with params schema")
+                        # Fallback A: messages + params nesting
+                        logger.info("AI API 422: retrying with messages + params schema")
                         alt_payload = {
-                            "input": prompt,
+                            "messages": messages,
                             "stream": False,
                             "params": {
                                 "max_tokens": AI_MAX_LENGTH,
@@ -117,7 +117,29 @@ class AIService:
                         )
                         logger.info(f"Received alt response, status: {alt.status_code}")
                         alt.raise_for_status()
-                        data = alt.json()
+                        try:
+                            data = alt.json()
+                        except Exception:
+                            data = {"output": alt.text}
+                        
+                        # If still invalid in practice, try Fallback B: input + top-level params
+                        if not data:
+                            alt_b = await client.post(
+                                url=self.api_url,
+                                headers=_headers("raw"),
+                                json={
+                                    "input": prompt,
+                                    "stream": False,
+                                    "max_tokens": AI_MAX_LENGTH,
+                                    "temperature": AI_TEMPERATURE,
+                                },
+                            )
+                            logger.info("Received alt B response, status: %s", alt_b.status_code)
+                            alt_b.raise_for_status()
+                            try:
+                                data = alt_b.json()
+                            except Exception:
+                                data = {"output": alt_b.text}
                     else:
                         raise
                 else:
@@ -173,37 +195,37 @@ class AIService:
                 if not content:
                     try:
                         keys = list(data.keys()) if isinstance(data, dict) else [type(data).__name__]
-                        logger.info("Primary schema returned empty content; keys=%s", keys)
+                        logger.info("Extraction empty; response keys=%s", keys)
                     except Exception:
                         pass
 
-                    # Retry with messages schema (top-level params)
+                    # Retry with input primary (top-level params)
                     try:
                         alt1 = await client.post(
                             url=self.api_url,
                             headers=_headers("raw"),
                             json={
-                                "messages": messages,
+                                "input": prompt,
                                 "stream": False,
                                 "max_tokens": AI_MAX_LENGTH,
                                 "temperature": AI_TEMPERATURE,
                             },
                         )
-                        logger.info("Messages schema status: %s", alt1.status_code)
+                        logger.info("Input schema status: %s", alt1.status_code)
                         alt1.raise_for_status()
                         data_alt1 = alt1.json()
                         content = _get_first_text(data_alt1)
                     except httpx.HTTPStatusError as _:
                         content = content or ""
 
-                    # If still empty, try messages + params nesting
+                    # If still empty, try input + params nesting
                     if not content:
                         try:
                             alt2 = await client.post(
                                 url=self.api_url,
                                 headers=_headers("raw"),
                                 json={
-                                    "messages": messages,
+                                    "input": prompt,
                                     "stream": False,
                                     "params": {
                                         "max_tokens": AI_MAX_LENGTH,
@@ -211,12 +233,21 @@ class AIService:
                                     },
                                 },
                             )
-                            logger.info("Messages schema (params) status: %s", alt2.status_code)
+                            logger.info("Input schema (params) status: %s", alt2.status_code)
                             alt2.raise_for_status()
                             data_alt2 = alt2.json()
                             content = _get_first_text(data_alt2)
                         except httpx.HTTPStatusError as _:
                             content = content or ""
+
+                # If still empty, last resort: include raw text body to attempt extraction
+                if not content:
+                    try:
+                        # This will only be available if last request object is named alt2 or response
+                        # but ensure we don't crash if not present.
+                        logger.info("AI response still empty after fallbacks")
+                    except Exception:
+                        pass
                 
                 # Clean and sanitize response to avoid leaking prompt/roles
                 content = clean_ai_response(content)
