@@ -45,12 +45,18 @@ class AIService:
                 # Build a single text prompt (Bytez v2 commonly expects `input`)
                 parts: List[str] = [f"[system] {AI_SYSTEM_PROMPT}"]
                 if conversation_history:
-                    for m in conversation_history[-10:]:  # keep last 10 messages
+                    for m in conversation_history[-10:]:
                         role = m.get("role", "user")
                         content = m.get("content", "")
                         parts.append(f"[{role}] {content}")
                 parts.append(f"[user] {user_message}")
                 prompt = "\n".join(parts)
+
+                # Also prepare messages schema for fallback
+                messages: List[Dict[str, str]] = [{"role": "system", "content": AI_SYSTEM_PROMPT}]
+                if conversation_history:
+                    messages.extend(conversation_history[-10:])
+                messages.append({"role": "user", "content": user_message})
 
                 def _headers(style: str) -> Dict[str, str]:
                     if style == "raw":
@@ -165,7 +171,52 @@ class AIService:
 
                 content = _get_first_text(data)
                 if not content:
-                    logger.debug("AI response body keys: %s", list(data.keys()) if isinstance(data, dict) else type(data))
+                    try:
+                        keys = list(data.keys()) if isinstance(data, dict) else [type(data).__name__]
+                        logger.info("Primary schema returned empty content; keys=%s", keys)
+                    except Exception:
+                        pass
+
+                    # Retry with messages schema (top-level params)
+                    try:
+                        alt1 = await client.post(
+                            url=self.api_url,
+                            headers=_headers("raw"),
+                            json={
+                                "messages": messages,
+                                "stream": False,
+                                "max_tokens": AI_MAX_LENGTH,
+                                "temperature": AI_TEMPERATURE,
+                            },
+                        )
+                        logger.info("Messages schema status: %s", alt1.status_code)
+                        alt1.raise_for_status()
+                        data_alt1 = alt1.json()
+                        content = _get_first_text(data_alt1)
+                    except httpx.HTTPStatusError as _:
+                        content = content or ""
+
+                    # If still empty, try messages + params nesting
+                    if not content:
+                        try:
+                            alt2 = await client.post(
+                                url=self.api_url,
+                                headers=_headers("raw"),
+                                json={
+                                    "messages": messages,
+                                    "stream": False,
+                                    "params": {
+                                        "max_tokens": AI_MAX_LENGTH,
+                                        "temperature": AI_TEMPERATURE,
+                                    },
+                                },
+                            )
+                            logger.info("Messages schema (params) status: %s", alt2.status_code)
+                            alt2.raise_for_status()
+                            data_alt2 = alt2.json()
+                            content = _get_first_text(data_alt2)
+                        except httpx.HTTPStatusError as _:
+                            content = content or ""
                 
                 # Clean and sanitize response to avoid leaking prompt/roles
                 content = clean_ai_response(content)
