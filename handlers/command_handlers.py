@@ -25,6 +25,7 @@ from utils.telegram_safe import (
 )
 from utils.whitelist import add_group, is_whitelisted
 from utils.download_tracker import download_tracker
+from utils.music_tracker import music_tracker
 
 logger = setup_logger(__name__)
 
@@ -450,12 +451,13 @@ async def cancel_dl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /music command - download audio"""
+    """Handle /music command - download audio with unified minimal status like mirror"""
     if not await group_only_filter(update, context):
         return
 
     message = update.message
     chat = update.effective_chat
+    user = update.effective_user
     if message is None or chat is None:
         logger.warning("Music command without message or chat context")
         return
@@ -486,56 +488,58 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     continue
         return None
     topic_id = _extract_topic(context.args)
-    status_message = await reply_text_safe(message, "🎵 Processing music links...")
+
+    # Unified per-user status banner like mirror
+    chat_id = chat.id
+    user_id = user.id if user else 0
+    user_display = (f"@{user.username}" if user and user.username else (user.first_name if user else str(user_id)))
+    group_display = chat.title or str(chat_id)
+    tracker = await music_tracker.ensure_tracker(chat_id, user_id, user_display, group_display)
+    if tracker.message_id is None:
+        banner = f"🎵 <b>Task</b> [{user_display}] <b>Music</b>\n👥 <b>Group</b> [{group_display}]\nMenyiapkan tugas…"
+        banner_msg = await reply_text_safe(message, banner, parse_mode="HTML")
+        await music_tracker.set_message_id(tracker, banner_msg.message_id)
+
+    # Pre-register a task; later we'll update filename if title is found
+    provisional_name = url.split('/')[-1].split('?')[0] or "audio"
+    task_meta = music_tracker.start_task(tracker, provisional_name)
+    try:
+        await music_tracker.update_task(context.bot, tracker, task_meta.id, stage="download", downloaded=0, total=None, speed_bps=0.0)
+    except Exception:
+        pass
 
     async def _runner():
         local_file_path = None
-        download_duration = None
-        upload_duration = None
+        upload_start = None
         metadata = None
         try:
-            await edit_text_safe(status_message, "📥 Downloading audio...")
-
             async def _on_progress(downloaded: int, total: Optional[int], speed: Optional[float], eta: Optional[float]):
                 try:
-                    if total and total > 0:
-                        percent = (downloaded / total) * 100.0
-                        bar = _progress_bar(percent)
-                        text = (
-                            "🎵 Downloading audio...\n"
-                            f"{bar}\n"
-                            f"{_format_size(downloaded)} / { _format_size(total) }\n"
-                            f"⚡ {_format_size(int(speed or 0))}/s | ⏳ {_format_eta(eta)}"
-                        )
-                    else:
-                        text = (
-                            "🎵 Downloading audio...\n"
-                            f"{_format_size(downloaded)} downloaded\n"
-                            f"⚡ {_format_size(int(speed or 0))}/s"
-                        )
-                    await edit_text_safe(status_message, text)
+                    await music_tracker.update_task(
+                        context.bot,
+                        tracker,
+                        task_meta.id,
+                        stage="download",
+                        downloaded=downloaded,
+                        total=total,
+                        speed_bps=float(speed or 0.0),
+                    )
                 except Exception:
                     pass
 
-            download_start = time.monotonic()
             success, info_message, local_file_path, metadata = await file_service.download_audio(url, progress_callback=_on_progress)
-            download_duration = time.monotonic() - download_start
-
-            if not success:
-                extra = f"\n⏱️ Download: {download_duration:.2f}s" if download_duration is not None else ""
-                await edit_text_safe(status_message, f"{info_message}{extra}")
+            if not success or not local_file_path:
+                await music_tracker.finish_task(context.bot, tracker, task_meta.id, success=False)
                 return
-
-            if local_file_path is None:
-                await edit_text_safe(status_message, "❌ Audio file is not available after download.")
-                return
-
-            await edit_text_safe(status_message, "📤 Uploading audio...")
 
             kwargs = {}
             title = metadata.get("title") if metadata else None
             if title:
                 kwargs["title"] = title
+                try:
+                    tracker.tasks[task_meta.id].filename = title
+                except Exception:
+                    pass
             duration_value = metadata.get("duration") if metadata else None
             if duration_value:
                 try:
@@ -555,18 +559,17 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         now = time.monotonic()
                         if now - last >= 1.0:
                             read = wrapped.bytes_read
-                            percent = (read / file_size * 100.0) if file_size else 0.0
-                            bar = _progress_bar(percent)
                             elapsed = max(0.001, now - wrapped.start_time)
                             speed = int(read / elapsed)
-                            eta = (file_size - read) / speed if speed > 0 else None
-                            text = (
-                                "📤 Uploading audio...\n"
-                                f"{bar}\n"
-                                f"{_format_size(read)} / {_format_size(file_size)}\n"
-                                f"⚡ {_format_size(speed)}/s | ⏳ {_format_eta(eta)}"
+                            await music_tracker.update_task(
+                                context.bot,
+                                tracker,
+                                task_meta.id,
+                                stage="upload",
+                                downloaded=read,
+                                total=file_size,
+                                speed_bps=float(speed),
                             )
-                            await status_message.edit_text(text)
                             last = now
                     except Exception:
                         pass
@@ -603,26 +606,13 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     base_f.close()
                 except Exception:
                     pass
-            upload_duration = time.monotonic() - upload_start
 
-            display_name = title or local_file_path.split('/')[-1]
-            await edit_text_safe(status_message,
-                "✅ Music sent successfully!\n"
-                f"🎶 {display_name}\n"
-                f"⏱️ Download: {download_duration:.2f}s\n"
-                f"📤 Upload: {upload_duration:.2f}s"
-            )
-            logger.info(f"Music command successful for {display_name} in group {chat.id}")
+            await music_tracker.finish_task(context.bot, tracker, task_meta.id, success=True)
+            logger.info("Music command successful in group %s", chat.id)
 
         except Exception as e:
             logger.error(f"Error in music command: {e}", exc_info=True)
-            extra_parts = []
-            if download_duration is not None:
-                extra_parts.append(f"⏱️ Download: {download_duration:.2f}s")
-            if upload_duration is not None:
-                extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
-            extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
-            await edit_text_safe(status_message, f"❌ There is an error: {str(e)}{extras}")
+            await music_tracker.finish_task(context.bot, tracker, task_meta.id, success=False)
         finally:
             if local_file_path:
                 file_service.cleanup_file(local_file_path)
