@@ -105,6 +105,26 @@ async def reply_document_safe(
         )
 
 
+async def send_document_safe(
+    bot: Bot,
+    *,
+    chat_id: int,
+    document: Any,
+    max_retries: int = 4,
+    **kwargs,
+):
+    """Thread-aware safe sender using bot.send_document (supports message_thread_id)."""
+    lock = _get_lock(chat_id)
+    async with lock:
+        return await _with_retry(
+            bot.send_document,
+            chat_id=chat_id,
+            document=document,
+            max_retries=max_retries,
+            **kwargs,
+        )
+
+
 async def reply_audio_safe(
     message: Message,
     *,

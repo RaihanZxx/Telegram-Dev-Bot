@@ -1,6 +1,7 @@
 import asyncio
 import time
 import uuid
+import html
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
@@ -124,18 +125,22 @@ class DownloadTracker:
         filled = int(round((p / 100.0) * width))
         return f"[{'█' * filled}{'░' * (width - filled)}] {p:5.1f}%"
 
+    def _esc(self, s: str) -> str:
+        return html.escape(s or "")
+
     def _format(self, tracker: UserTracker) -> str:
         lines = []
-        lines.append(f"Task [{tracker.user_display}] Mirror.")
-        lines.append(f"Group [{tracker.group_display}]")
+        lines.append(f"🔁 <b>Task</b> [{self._esc(tracker.user_display)}] <b>Mirror</b>.")
+        lines.append(f"👥 <b>Group</b> [{self._esc(tracker.group_display)}].")
         active = list(tracker.tasks.values())
         if len(active) > 1:
-            lines.append(f"[Download {len(active)}] File")
+            lines.append(f"📦 [Download {len(active)}] File\n")
         for t in active:
-            lines.append(f"[{t.filename}]")
+            stage_icon = "📥" if t.stage == "download" else ("📤" if t.stage == "upload" else "✅")
+            lines.append(f"{stage_icon} <code>{self._esc(t.filename)}</code>")
             lines.append(self._progress_bar(t.percent))
         if not active:
-            lines.append("Tidak ada tugas unduhan aktif.")
+            lines.append("—")
         return "\n".join(lines)
 
     async def _render(self, bot: Bot, tracker: UserTracker):
@@ -153,6 +158,7 @@ class DownloadTracker:
                 chat_id=tracker.chat_id,
                 message_id=tracker.message_id,
                 text=text,
+                parse_mode="HTML",
             )
         except Exception:
             # Ignore edit failures silently

@@ -20,6 +20,7 @@ from utils.telegram_safe import (
     edit_text_safe,
     reply_document_safe,
     reply_audio_safe,
+    send_document_safe,
 )
 from utils.whitelist import add_group, is_whitelisted
 from utils.download_tracker import download_tracker
@@ -223,6 +224,16 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     url = context.args[0]
+    topic_id: Optional[int] = None
+    # find optional topic id like -1724 among args
+    for a in context.args[1:]:
+        cleaned = a.rstrip(".,)")
+        if cleaned.lstrip("-").isdigit():
+            try:
+                topic_id = abs(int(cleaned))
+            except ValueError:
+                topic_id = None
+            break
 
     # Per-user concurrency limit (2)
     user_id = user.id if user else 0
@@ -245,6 +256,19 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Prepare filename & register task before scheduling
     filename = url.split('/')[-1].split('?')[0] or "file"
     task_meta = download_tracker.start_task(tracker, filename)
+    # Initial render in minimalist format
+    try:
+        await download_tracker.update_task(
+            context.bot,
+            tracker,
+            task_meta.id,
+            stage="download",
+            downloaded=0,
+            total=None,
+            speed_bps=0.0,
+        )
+    except Exception:
+        pass
 
     async def _runner(task_id: str):
         local_file_path = None
@@ -315,21 +339,41 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             updater_task = asyncio.create_task(_upload_progress_updater())
             try:
                 try:
-                    await reply_document_safe(
-                        message,
-                        document=wrapped,
-                        read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                        write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                    )
-                except NetworkError as ne:
-                    if "Request Entity Too Large" in str(ne):
-                        logger.warning("Upload rejected with 413. Falling back to Telegram fetch-by-URL.")
-                        await reply_document_safe(
-                            message,
-                            document=url,
+                    if topic_id:
+                        await send_document_safe(
+                            context.bot,
+                            chat_id=chat_id,
+                            document=wrapped,
+                            message_thread_id=topic_id,
                             read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
                             write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
                         )
+                    else:
+                        await reply_document_safe(
+                            message,
+                            document=wrapped,
+                            read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                            write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                        )
+                except NetworkError as ne:
+                    if "Request Entity Too Large" in str(ne):
+                        logger.warning("Upload rejected with 413. Falling back to Telegram fetch-by-URL.")
+                        if topic_id:
+                            await send_document_safe(
+                                context.bot,
+                                chat_id=chat_id,
+                                document=url,
+                                message_thread_id=topic_id,
+                                read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                                write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                            )
+                        else:
+                            await reply_document_safe(
+                                message,
+                                document=url,
+                                read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                                write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                            )
                     else:
                         raise
             finally:
