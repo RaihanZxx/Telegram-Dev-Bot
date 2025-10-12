@@ -126,8 +126,21 @@ class AIService:
                 else:
                     content = str(output)
                 
-                # Clean the response
+                # Clean and sanitize response to avoid leaking prompt/roles
                 content = clean_ai_response(content)
+                try:
+                    # Remove any leaked system prompt and role-tag lines
+                    if AI_SYSTEM_PROMPT:
+                        content = content.replace(AI_SYSTEM_PROMPT, "")
+                    lines = [
+                        ln for ln in content.splitlines()
+                        if not ln.strip().startswith("[system]")
+                        and not ln.strip().startswith("[user]")
+                        and not ln.strip().startswith("[assistant]")
+                    ]
+                    content = "\n".join(lines)
+                except Exception:
+                    pass
                 
                 if not content or content.strip() == "":
                     logger.warning("Empty response from AI")
