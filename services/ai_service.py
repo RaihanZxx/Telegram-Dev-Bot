@@ -42,35 +42,33 @@ class AIService:
             try:
                 logger.info(f"Sending request to AI API")
                 
-                # Build messages
-                messages = [
-                    {"role": "system", "content": AI_SYSTEM_PROMPT}
-                ]
-                
-                # Add conversation history if provided
+                # Build a single text prompt (Bytez v2 commonly expects `input`)
+                parts: List[str] = [f"[system] {AI_SYSTEM_PROMPT}"]
                 if conversation_history:
-                    messages.extend(conversation_history[-10:])  # Last 10 messages
-                
-                # Add current user message
-                messages.append({"role": "user", "content": user_message})
-                
+                    for m in conversation_history[-10:]:  # keep last 10 messages
+                        role = m.get("role", "user")
+                        content = m.get("content", "")
+                        parts.append(f"[{role}] {content}")
+                parts.append(f"[user] {user_message}")
+                prompt = "\n".join(parts)
+
                 def _headers(style: str) -> Dict[str, str]:
                     if style == "raw":
                         return {
                             "Authorization": self.api_key,
                             "Content-Type": "application/json",
                         }
-                    else:
-                        return {
-                            "Authorization": f"Bearer {self.api_key}",
-                            "Content-Type": "application/json",
-                        }
+                    return {
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    }
 
+                # Primary schema: input + params.max_tokens/temperature
                 payload = {
-                    "messages": messages,
+                    "input": prompt,
                     "stream": False,
                     "params": {
-                        "max_length": AI_MAX_LENGTH,
+                        "max_tokens": AI_MAX_LENGTH,
                         "temperature": AI_TEMPERATURE,
                     },
                 }
@@ -98,10 +96,10 @@ class AIService:
                         retry.raise_for_status()
                         data = retry.json()
                     elif first_err.response.status_code == 422:
-                        # Fallback: try alternative param naming schema
-                        logger.info("AI API 422: retrying with max_tokens schema")
+                        # Fallback: try top-level params (some deployments expect flat schema)
+                        logger.info("AI API 422: retrying with top-level max_tokens schema")
                         alt_payload = {
-                            "messages": messages,
+                            "input": prompt,
                             "stream": False,
                             "max_tokens": AI_MAX_LENGTH,
                             "temperature": AI_TEMPERATURE,
