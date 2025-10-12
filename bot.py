@@ -4,7 +4,6 @@ Telegram Developer Assistant Bot
 A professional bot for helping developers in Telegram groups.
 """
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
-from telegram.request import HTTPXRequest
 
 from config.settings import TELEGRAM_TOKEN, TELEGRAM_API_BASE_URL
 from handlers.command_handlers import (
@@ -31,8 +30,7 @@ def main():
 
     builder = Application.builder().token(TELEGRAM_TOKEN).concurrent_updates(True)
     if TELEGRAM_API_BASE_URL:
-        request = HTTPXRequest(base_url=TELEGRAM_API_BASE_URL)
-        builder = builder.request(request)
+        builder = builder.base_url(TELEGRAM_API_BASE_URL)
     application = builder.build()
 
     application.add_handler(CommandHandler("start", start_command))
