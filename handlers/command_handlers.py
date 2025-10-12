@@ -21,6 +21,7 @@ from utils.telegram_safe import (
     reply_document_safe,
     reply_audio_safe,
     send_document_safe,
+    send_audio_safe,
 )
 from utils.whitelist import add_group, is_whitelisted
 from utils.download_tracker import download_tracker
@@ -468,6 +469,23 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     url = context.args[0]
+    # Optional topic id like -1724 to post audio into specific thread
+    topic_id: Optional[int] = None
+    def _extract_topic(args_list) -> Optional[int]:
+        import re
+        for tok in args_list[1:]:
+            cleaned = tok.strip().strip(".,)]}(")
+            cleaned = cleaned.replace("–", "-").replace("—", "-").replace("−", "-")
+            if cleaned.startswith("#"):
+                cleaned = cleaned[1:]
+            m = re.fullmatch(r"-?(\d{1,10})", cleaned)
+            if m:
+                try:
+                    return int(m.group(1))
+                except ValueError:
+                    continue
+        return None
+    topic_id = _extract_topic(context.args)
     status_message = await reply_text_safe(message, "🎵 Processing music links...")
 
     async def _runner():
@@ -557,13 +575,24 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             upload_start = time.monotonic()
             updater_task = asyncio.create_task(_upload_progress_updater_audio())
             try:
-                await reply_audio_safe(
-                    message,
-                    audio=wrapped,
-                    read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                    write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                    **kwargs,
-                )
+                if topic_id:
+                    await send_audio_safe(
+                        context.bot,
+                        chat_id=chat.id,
+                        audio=wrapped,
+                        message_thread_id=topic_id,
+                        read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                        write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                        **kwargs,
+                    )
+                else:
+                    await reply_audio_safe(
+                        message,
+                        audio=wrapped,
+                        read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                        write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
+                        **kwargs,
+                    )
             finally:
                 stop_event.set()
                 try:
