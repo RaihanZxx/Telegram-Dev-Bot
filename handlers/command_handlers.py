@@ -15,6 +15,13 @@ from services.file_service import file_service
 from services.image_service import image_service
 from utils.logger import setup_logger
 from utils.upload_progress import UploadProgressReader
+from utils.telegram_safe import (
+    reply_text_safe,
+    edit_text_safe,
+    reply_document_safe,
+    reply_audio_safe,
+)
+from utils.whitelist import add_group, is_whitelisted
 
 logger = setup_logger(__name__)
 
@@ -63,10 +70,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Use /help to see all available commands.."
     )
     
-    await message.reply_text(
-        welcome_message,
-        parse_mode="HTML"
-    )
+    await reply_text_safe(message, welcome_message, parse_mode="HTML")
     logger.info(f"Start command from group {chat.id}")
 
 
@@ -100,11 +104,35 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Rate limit: 10 messages per minute per user"
     )
     
-    await message.reply_text(
-        help_message,
-        parse_mode="HTML"
-    )
+    await reply_text_safe(message, help_message, parse_mode="HTML")
     logger.info(f"Help command from group {chat.id}")
+
+
+ADMIN_ID = 6677851276
+
+
+async def whitelist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin-only: whitelist current group so bot can operate here"""
+    message = update.message
+    chat = update.effective_chat
+    user = update.effective_user
+    if not message or not chat or not user:
+        return
+
+    if user.id != ADMIN_ID:
+        await reply_text_safe(message, "❌ You are not allowed to use this command.")
+        return
+
+    if chat.type not in ("group", "supergroup"):
+        await reply_text_safe(message, "⚠️ Use this command inside the target group.")
+        return
+
+    if await is_whitelisted(chat.id):
+        await reply_text_safe(message, "✅ This group is already whitelisted.")
+        return
+
+    await add_group(chat.id)
+    await reply_text_safe(message, f"✅ Group {chat.id} has been whitelisted. Bot is now enabled here.")
 
 
 async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -121,9 +149,7 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     group_id = chat.id
     context_manager.clear_context(group_id)
     
-    await message.reply_text(
-        "🗑️ Conversation history has been deleted!"
-    )
+    await reply_text_safe(message, "🗑️ Conversation history has been deleted!")
     logger.info(f"Clear command from group {group_id}")
 
 
@@ -138,7 +164,7 @@ async def clear_db_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.warning("Clear DB command without message or chat context")
         return
 
-    status_message = await message.reply_text("🧹 Cleaning temporary folders...")
+    status_message = await reply_text_safe(message, "🧹 Cleaning temporary folders...")
 
     files_removed, dirs_removed, errors = await asyncio.to_thread(file_service.cleanup_temp_directory)
 
@@ -161,7 +187,7 @@ async def clear_db_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🧹 Dibersihkan: {summary}"
         )
 
-    await status_message.edit_text(response)
+    await edit_text_safe(status_message, response)
     logger.info(
         "Clear DB command executed in group %s (files: %s, dirs: %s, errors: %s)",
         chat.id,
@@ -183,7 +209,7 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await message.reply_text(
+        await reply_text_safe(
             "❌ Please provide the file URL.\n"
             "Contoh: <code>/mirror https://example.com/file.zip</code>",
             parse_mode="HTML"
@@ -191,7 +217,7 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     url = context.args[0]
-    status_message = await message.reply_text("🔗 Starting download...")
+    status_message = await reply_text_safe(message, "🔗 Starting download...")
 
     async def _runner():
         local_file_path = None
@@ -200,7 +226,7 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         upload_start = None
         try:
             filename = url.split('/')[-1].split('?')[0] or "file"
-            await status_message.edit_text(f"📥 Downloading `{filename}`...")
+            await edit_text_safe(status_message, f"📥 Downloading `{filename}`...")
 
             async def _on_progress(downloaded: int, total: Optional[int], speed_bps: float):
                 try:
@@ -219,7 +245,7 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             f"{_format_size(downloaded)} downloaded\n"
                             f"⚡ {_format_size(int(speed_bps))}/s"
                         )
-                    await status_message.edit_text(text)
+                    await edit_text_safe(status_message, text)
                 except Exception:
                     pass
 
@@ -229,14 +255,14 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if not success:
                 extra = f"\n⏱️ Download: {download_duration:.2f}s" if download_duration is not None else ""
-                await status_message.edit_text(f"{status_text}{extra}")
+                await edit_text_safe(status_message, f"{status_text}{extra}")
                 return
 
             if local_file_path is None:
-                await status_message.edit_text("❌ File not available after download.")
+                await edit_text_safe(status_message, "❌ File not available after download.")
                 return
 
-            await status_message.edit_text(f"📤 Uploading `{filename}`...")
+            await edit_text_safe(status_message, f"📤 Uploading `{filename}`...")
 
             file_size = os.path.getsize(local_file_path)
             base_f = open(local_file_path, 'rb')
@@ -271,7 +297,8 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             updater_task = asyncio.create_task(_upload_progress_updater())
             try:
                 try:
-                    await message.reply_document(
+                    await reply_document_safe(
+                        message,
                         document=wrapped,
                         read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
                         write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
@@ -280,12 +307,13 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if "Request Entity Too Large" in str(ne):
                         logger.warning("Upload rejected with 413. Falling back to Telegram fetch-by-URL.")
                         try:
-                            await status_message.edit_text(
+                            await edit_text_safe(
                                 f"⚠️ Upload too large for direct send. Trying via URL fetch...\n📎 {filename}"
                             )
                         except Exception:
                             pass
-                        await message.reply_document(
+                        await reply_document_safe(
+                            message,
                             document=url,
                             read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
                             write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
@@ -311,7 +339,7 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📤 Upload: {upload_duration:.2f}s"
             )
             try:
-                await status_message.edit_text(success_text)
+                await edit_text_safe(status_message, success_text)
             except (TimedOut, asyncio.TimeoutError) as edit_error:
                 logger.warning(f"Status message update timed out: {edit_error}")
             except TelegramError as edit_error:
@@ -329,7 +357,7 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
             extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
             try:
-                await status_message.edit_text(
+                await edit_text_safe(
                     "❌ An error occurred: Uploading to Telegram exceeded the time limit.."
                     " Please try again in a few moments." + extras
                 )
@@ -349,7 +377,7 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
             extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
             try:
-                await status_message.edit_text(
+                await edit_text_safe(
                     "❌ An error occurred: Uploading to Telegram exceeded the time limit."
                     " Please try again in a few moments." + extras
                 )
@@ -366,7 +394,7 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if upload_duration is not None:
                 extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
             extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
-            await status_message.edit_text(f"❌ There is an error: {str(e)}{extras}")
+            await edit_text_safe(status_message, f"❌ There is an error: {str(e)}{extras}")
         finally:
             if local_file_path:
                 file_service.cleanup_file(local_file_path)
@@ -387,7 +415,7 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await message.reply_text(
+        await reply_text_safe(
             "❌ Please provide the music URL.\n"
             "Example: <code>/music https://music.youtube.com/watch?v=hsfa1RSk0pA</code>",
             parse_mode="HTML"
@@ -395,7 +423,7 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     url = context.args[0]
-    status_message = await message.reply_text("🎵 Processing music links...")
+    status_message = await reply_text_safe(message, "🎵 Processing music links...")
 
     async def _runner():
         local_file_path = None
@@ -403,7 +431,7 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         upload_duration = None
         metadata = None
         try:
-            await status_message.edit_text("📥 Downloading audio...")
+            await edit_text_safe(status_message, "📥 Downloading audio...")
 
             async def _on_progress(downloaded: int, total: Optional[int], speed: Optional[float], eta: Optional[float]):
                 try:
@@ -422,7 +450,7 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             f"{_format_size(downloaded)} downloaded\n"
                             f"⚡ {_format_size(int(speed or 0))}/s"
                         )
-                    await status_message.edit_text(text)
+                    await edit_text_safe(status_message, text)
                 except Exception:
                     pass
 
@@ -432,14 +460,14 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if not success:
                 extra = f"\n⏱️ Download: {download_duration:.2f}s" if download_duration is not None else ""
-                await status_message.edit_text(f"{info_message}{extra}")
+                await edit_text_safe(status_message, f"{info_message}{extra}")
                 return
 
             if local_file_path is None:
-                await status_message.edit_text("❌ Audio file is not available after download.")
+                await edit_text_safe(status_message, "❌ Audio file is not available after download.")
                 return
 
-            await status_message.edit_text("📤 Uploading audio...")
+            await edit_text_safe(status_message, "📤 Uploading audio...")
 
             kwargs = {}
             title = metadata.get("title") if metadata else None
@@ -484,7 +512,8 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             upload_start = time.monotonic()
             updater_task = asyncio.create_task(_upload_progress_updater_audio())
             try:
-                await message.reply_audio(
+                await reply_audio_safe(
+                    message,
                     audio=wrapped,
                     read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
                     write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
@@ -503,7 +532,7 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             upload_duration = time.monotonic() - upload_start
 
             display_name = title or local_file_path.split('/')[-1]
-            await status_message.edit_text(
+            await edit_text_safe(status_message,
                 "✅ Music sent successfully!\n"
                 f"🎶 {display_name}\n"
                 f"⏱️ Download: {download_duration:.2f}s\n"
@@ -519,7 +548,7 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if upload_duration is not None:
                 extra_parts.append(f"📤 Upload: {upload_duration:.2f}s")
             extras = f"\n{'\n'.join(extra_parts)}" if extra_parts else ""
-            await status_message.edit_text(f"❌ There is an error: {str(e)}{extras}")
+            await edit_text_safe(status_message, f"❌ There is an error: {str(e)}{extras}")
         finally:
             if local_file_path:
                 file_service.cleanup_file(local_file_path)
@@ -546,25 +575,25 @@ async def image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prompt = message.reply_to_message.text.strip()
 
     if not prompt:
-        await message.reply_text(
+        await reply_text_safe(
             "❌ Please provide a description of the image.\n"
             "Example: <code>/image kucing astronot</code>",
             parse_mode="HTML",
         )
         return
 
-    status_message = await message.reply_text("🎨 Produces images...")
+    status_message = await reply_text_safe(message, "🎨 Produces images...")
 
     try:
         image_buffer = await image_service.generate_image(prompt)
         if image_buffer is None:
-            await status_message.edit_text("❌ Failed to create image. Please try again later.")
+            await edit_text_safe(status_message, "❌ Failed to create image. Please try again later.")
             return
 
         await message.reply_photo(photo=image_buffer, caption=f"🖼️ Prompt: {prompt}")
-        await status_message.edit_text("✅ Image created successfully!")
+        await edit_text_safe(status_message, "✅ Image created successfully!")
         logger.info("Image generated for prompt in group %s", chat.id)
 
     except Exception as exc:  # noqa: BLE001
         logger.error("Error in image command: %s", exc, exc_info=True)
-        await status_message.edit_text("❌ An error occurred while creating the image..")
+        await edit_text_safe(status_message, "❌ An error occurred while creating the image..")

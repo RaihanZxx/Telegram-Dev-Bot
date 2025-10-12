@@ -55,27 +55,50 @@ class AIService:
                 messages.append({"role": "user", "content": user_message})
                 
                 headers: Dict[str, str] = {
-                    "Authorization": self.api_key,
+                    "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json"
+                }
+
+                payload = {
+                    "messages": messages,
+                    "stream": False,
+                    "params": {
+                        "max_length": AI_MAX_LENGTH,
+                        "temperature": AI_TEMPERATURE,
+                    },
                 }
 
                 response = await client.post(
                     url=self.api_url,
                     headers=headers,
-                    json={
-                        "messages": messages,
-                        "stream": False,
-                        "params": {
-                            "max_length": AI_MAX_LENGTH,
-                            "temperature": AI_TEMPERATURE
-                        }
-                    }
+                    json=payload,
                 )
                 
                 logger.info(f"Received response, status: {response.status_code}")
-                response.raise_for_status()
-                
-                data = response.json()
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as first_err:
+                    if first_err.response.status_code == 422:
+                        # Fallback: try alternative param naming schema
+                        logger.info("AI API 422: retrying with max_tokens schema")
+                        alt_payload = {
+                            "messages": messages,
+                            "stream": False,
+                            "max_tokens": AI_MAX_LENGTH,
+                            "temperature": AI_TEMPERATURE,
+                        }
+                        alt = await client.post(
+                            url=self.api_url,
+                            headers=headers,
+                            json=alt_payload,
+                        )
+                        logger.info(f"Received alt response, status: {alt.status_code}")
+                        alt.raise_for_status()
+                        data = alt.json()
+                    else:
+                        raise
+                else:
+                    data = response.json()
                 
                 # Extract content from response
                 output = data.get('output', '')
@@ -108,6 +131,8 @@ class AIService:
                     return "🔒 Authentication error. Invalid API Key."
                 elif e.response.status_code == 429:
                     return "⚠️ Too many requests. Please try again later."
+                elif e.response.status_code == 422:
+                    return "❌ The AI request was rejected (422). Please try again or rephrase your prompt."
                 else:
                     return f"❌ An error occurred while contacting AI (HTTP {e.response.status_code})."
                     

@@ -12,6 +12,10 @@ from services.ai_service import ai_service
 from utils.rate_limiter import rate_limiter
 from utils.markdown import format_telegram_markdown, clean_ai_response
 from utils.logger import setup_logger
+from utils.telegram_safe import (
+    edit_message_text_safe,
+    reply_text_safe,
+)
 
 logger = setup_logger(__name__)
 
@@ -79,16 +83,18 @@ async def _deliver_long_message(
         formatted_chunk = format_telegram_markdown(chunk_text)
         try:
             if edit_message_id is not None:
-                await context.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=edit_message_id,
-                    text=formatted_chunk,
-                    parse_mode=ParseMode.MARKDOWN_V2
+                await edit_message_text_safe(
+                    context.bot,
+                    chat_id,
+                    edit_message_id,
+                    formatted_chunk,
+                    parse_mode=ParseMode.MARKDOWN_V2,
                 )
             elif reply_target is not None:
-                await reply_target.reply_text(
+                await reply_text_safe(
+                    reply_target,
                     formatted_chunk,
-                    parse_mode=ParseMode.MARKDOWN_V2
+                    parse_mode=ParseMode.MARKDOWN_V2,
                 )
         except BadRequest as chunk_markdown_error:
             logger.warning(
@@ -98,14 +104,15 @@ async def _deliver_long_message(
             safe_text = chunk_text[:MAX_MESSAGE_LENGTH]
             try:
                 if edit_message_id is not None:
-                    await context.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=edit_message_id,
-                        text=safe_text,
-                        parse_mode=None
+                    await edit_message_text_safe(
+                        context.bot,
+                        chat_id,
+                        edit_message_id,
+                        safe_text,
+                        parse_mode=None,
                     )
                 elif reply_target is not None:
-                    await reply_target.reply_text(safe_text)
+                    await reply_text_safe(reply_target, safe_text)
             except BadRequest as chunk_plain_error:
                 logger.error(
                     "Plain text chunk delivery failed: %s",
@@ -113,14 +120,15 @@ async def _deliver_long_message(
                 )
                 truncated = safe_text[:MAX_MESSAGE_LENGTH]
                 if edit_message_id is not None:
-                    await context.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=edit_message_id,
-                        text=truncated,
-                        parse_mode=None
+                    await edit_message_text_safe(
+                        context.bot,
+                        chat_id,
+                        edit_message_id,
+                        truncated,
+                        parse_mode=None,
                     )
                 elif reply_target is not None:
-                    await reply_target.reply_text(truncated)
+                    await reply_text_safe(reply_target, truncated)
         except TelegramError as chunk_delivery_error:
             logger.error(
                 "Telegram error while sending chunk: %s",
@@ -128,14 +136,15 @@ async def _deliver_long_message(
             )
             truncated = chunk_text[:MAX_MESSAGE_LENGTH]
             if edit_message_id is not None:
-                await context.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=edit_message_id,
-                    text=truncated,
-                    parse_mode=None
+                await edit_message_text_safe(
+                    context.bot,
+                    chat_id,
+                    edit_message_id,
+                    truncated,
+                    parse_mode=None,
                 )
             elif reply_target is not None:
-                await reply_target.reply_text(truncated)
+                await reply_text_safe(reply_target, truncated)
 
     # Replace thinking message with first chunk
     await _send_chunk(
@@ -201,7 +210,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Send thinking indicator
-    thinking_message = await message.reply_text("🤔 Think...")
+    thinking_message = await reply_text_safe(message, "🤔 Think...")
 
     # Quick replies for simple greetings/tests
     normalized_user_message = _normalize_message(user_message)
@@ -212,11 +221,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ):
         quick_response = "Hello! How can I help you??"
         formatted_quick_response = format_telegram_markdown(quick_response)
-        await context.bot.edit_message_text(
-            chat_id=chat.id,
-            message_id=thinking_message.message_id,
-            text=formatted_quick_response,
-            parse_mode=ParseMode.MARKDOWN_V2
+        await edit_message_text_safe(
+            context.bot,
+            chat.id,
+            thinking_message.message_id,
+            formatted_quick_response,
+            parse_mode=ParseMode.MARKDOWN_V2,
         )
         context_manager.add_message(group_id, "user", user_message)
         context_manager.add_message(group_id, "assistant", quick_response)
@@ -246,11 +256,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Send response
         try:
             try:
-                await context.bot.edit_message_text(
-                    chat_id=chat.id,
-                    message_id=thinking_message.message_id,
-                    text=formatted_response,
-                    parse_mode=ParseMode.MARKDOWN_V2
+                await edit_message_text_safe(
+                    context.bot,
+                    chat.id,
+                    thinking_message.message_id,
+                    formatted_response,
+                    parse_mode=ParseMode.MARKDOWN_V2,
                 )
             except BadRequest as markdown_error:
                 logger.warning(
@@ -277,24 +288,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await message.reply_text(cleaned_response[:MAX_MESSAGE_LENGTH])
                 else:
                     try:
-                        await context.bot.edit_message_text(
-                            chat_id=chat.id,
-                            message_id=thinking_message.message_id,
-                            text=cleaned_response,
-                            parse_mode=None
+                        await edit_message_text_safe(
+                            context.bot,
+                            chat.id,
+                            thinking_message.message_id,
+                            cleaned_response,
+                            parse_mode=None,
                         )
                     except BadRequest as fallback_error:
                         logger.error(
                             "Fallback plain text delivery failed: %s",
                             fallback_error
                         )
-                        await message.reply_text(cleaned_response)
+                        await reply_text_safe(message, cleaned_response)
         except TelegramError as delivery_error:
             logger.error(
                 "Failed to deliver response message: %s",
                 delivery_error
             )
-            await message.reply_text(cleaned_response[:MAX_MESSAGE_LENGTH])
+            await reply_text_safe(message, cleaned_response[:MAX_MESSAGE_LENGTH])
         
         # Update conversation context
         context_manager.add_message(group_id, "user", user_message)
@@ -307,14 +319,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Try to send error message
         try:
-            await context.bot.edit_message_text(
-                chat_id=chat.id,
-                message_id=thinking_message.message_id,
-                text="❌ Sorry, there was a technical problem. Please try again later."
+            await edit_message_text_safe(
+                context.bot,
+                chat.id,
+                thinking_message.message_id,
+                "❌ Sorry, there was a technical problem. Please try again later.",
             )
         except Exception as edit_error:
             logger.error(f"Failed to edit error message: {edit_error}")
             # Fallback: send new message
-            await message.reply_text(
-                "❌ Sorry, there was a technical problem. Please try again later."
+            await reply_text_safe(
+                message,
+                "❌ Sorry, there was a technical problem. Please try again later.",
             )

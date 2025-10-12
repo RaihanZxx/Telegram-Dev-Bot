@@ -1,8 +1,9 @@
-"""Middleware to ensure bot only works in groups"""
+"""Middleware to ensure bot only works in groups and whitelisted chats"""
 from telegram import Update, Chat
 from telegram.ext import ContextTypes
 from utils.logger import setup_logger
 from config.settings import GROUP_ONLY
+from utils.whitelist import is_whitelisted
 
 logger = setup_logger(__name__)
 
@@ -42,5 +43,14 @@ async def group_only_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
         return False
     
-    logger.debug(f"Message from group: {chat.id} ({chat.title})")
+    # Enforce whitelist for groups
+    if not await is_whitelisted(chat.id):
+        if update.message:
+            await update.message.reply_text(
+                "contact @hansobored for permission using bot"
+            )
+        logger.warning("Blocked non-whitelisted group %s", chat.id)
+        return False
+
+    logger.debug(f"Message from whitelisted group: {chat.id} ({chat.title})")
     return True

@@ -13,7 +13,8 @@ from handlers.command_handlers import (
     clear_db_command,
     mirror_command,
     music_command,
-    image_command
+    image_command,
+    whitelist_command,
 )
 from handlers.message_handlers import handle_message
 from utils.logger import setup_logger
@@ -41,6 +42,7 @@ def main():
     application.add_handler(CommandHandler("mirror", mirror_command))
     application.add_handler(CommandHandler("music", music_command))
     application.add_handler(CommandHandler("image", image_command))
+    application.add_handler(CommandHandler("whitelist", whitelist_command))
 
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
