@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# ensure bash when invoked via sh
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 set -euo pipefail
 
 # Interactive setup: infra (swap, firewall, Docker, Bot API, Nginx+TLS) + bot venv + systemd
@@ -11,9 +13,51 @@ FFMPEG_FLAG_FILE="$PROJECT_DIR/.installed.ffmpeg"
 
 echo "[+] Project dir: $PROJECT_DIR"
 
-command -v python3 >/dev/null 2>&1 || { echo "python3 not found"; exit 1; }
-command -v pip3 >/dev/null 2>&1 || { echo "pip3 not found"; exit 1; }
 command -v systemctl >/dev/null 2>&1 || { echo "systemd (systemctl) not found"; exit 1; }
+
+pkg_install() {
+  local pkgs=("$@")
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -y
+    sudo apt-get install -y "${pkgs[@]}"
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y "${pkgs[@]}"
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y "${pkgs[@]}"
+  elif command -v pacman >/dev/null 2>&1; then
+    sudo pacman -Sy --noconfirm "${pkgs[@]}"
+  else
+    return 1
+  fi
+}
+
+# ensure curl for later steps
+if ! command -v curl >/dev/null 2>&1; then
+  echo "[+] Installing curl"
+  pkg_install curl || true
+fi
+
+ensure_python() {
+  local need=0
+  command -v python3 >/dev/null 2>&1 || need=1
+  command -v pip3 >/dev/null 2>&1 || need=1
+  if [ "$need" -eq 1 ]; then
+    echo "[+] Installing python3, pip, venv"
+    if command -v apt-get >/dev/null 2>&1; then
+      pkg_install python3 python3-pip python3-venv
+    elif command -v dnf >/dev/null 2>&1; then
+      pkg_install python3 python3-pip
+    elif command -v yum >/dev/null 2>&1; then
+      pkg_install python3 python3-pip
+    elif command -v pacman >/dev/null 2>&1; then
+      pkg_install python python-pip
+    fi
+  fi
+  command -v python3 >/dev/null 2>&1 || { echo "python3 not found after install"; exit 1; }
+  command -v pip3 >/dev/null 2>&1 || { echo "pip3 not found after install"; exit 1; }
+}
+
+ensure_python
 
 ask_yes_no() { local p="$1"; read -r -p "$p [y/N]: " ans || true; [[ "${ans:-}" =~ ^[Yy]$ ]]; }
 prompt() { local p="$1"; local v; read -r -p "$p: " v; echo "$v"; }
