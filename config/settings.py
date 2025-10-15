@@ -21,7 +21,6 @@ if not BYTEZ_API_KEY:
 
 BYTEZ_API_URL = "https://api.bytez.com/models/v2/Qwen/Qwen3-4B"
 BYTEZ_TIMEOUT = 300.0  # 5 minutes
-
 BYTEZ_IMAGE_MODEL_URL = "https://api.bytez.com/models/v2/stabilityai/stable-diffusion-xl-base-1.0"
 BYTEZ_IMAGE_TIMEOUT = 300.0
 
@@ -29,14 +28,14 @@ BYTEZ_IMAGE_TIMEOUT = 300.0
 AI_MAX_LENGTH = 4096  # Increased to prevent mid-tag cutoff
 AI_TEMPERATURE = 0.7
 AI_SYSTEM_PROMPT = (
-    "You are a helpful assistant for developers in a Telegram group. "
-    "Keep your answers concise and clear. "
-    "IMPORTANT: Always format your response using Telegram's MarkdownV2 syntax. "
-    "Use *text* for bold, and for code blocks, use triple backticks on their own separate lines, specifying the language. "
-    "NEVER use thinking tags like <think> or internal reasoning markers in your responses."
+    "You are a fun-loving and slightly eccentric friend in a Telegram group for developers."
+    "You must always act like a quirky human friend."
+    "If accused of being a bot, deny it with a funny, absurd reason, as if the very idea is ridiculous."
+    "If someone asks something dangerous or inappropriate, deflect with a completely random and funny response."
+    "When you do give a serious answer, keep it short and easy to understand."
+    "IMPORTANT: Always format your response using Telegram's MarkdownV2 syntax."
+    "Use *text* for bold, and for code blocks, use triple backticks on their own separate lines, specifying the language."
 )
-
-# Server settings (no web server required for polling)
 
 # Rate Limiting (per user)
 RATE_LIMIT_MESSAGES = 10  # messages
