@@ -150,9 +150,11 @@ class FileService:
             return None
 
         file_id = _extract_id(url)
+        logger.info(f"Google Drive download - extracted file ID: {file_id} from URL: {url}")
         initial_url = url
         if file_id:
             initial_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+            logger.info(f"Using initial URL: {initial_url}")
 
         local_file_path: Optional[str] = None
         try:
@@ -347,11 +349,26 @@ class FileService:
                 return False, "❌ Failed to download from Google Drive.", None
 
             file_size = os.path.getsize(local_file_path)
+            logger.info(f"Downloaded file size: {file_size} bytes from Google Drive")
+            
+            # Validate that we didn't download an HTML error page
+            if file_size < 1024:  # Files smaller than 1KB are suspicious
+                try:
+                    with open(local_file_path, 'rb') as f:
+                        first_bytes = f.read(512)
+                        if b'<!DOCTYPE' in first_bytes or b'<html' in first_bytes.lower():
+                            logger.error(f"Downloaded file appears to be HTML error page: {first_bytes[:200]}")
+                            self.cleanup_file(local_file_path)
+                            return False, "❌ Google Drive: File tidak dapat diakses. Pastikan link sharing di-set ke 'Anyone with the link'.", None
+                except Exception as e:
+                    logger.error(f"Error validating downloaded file: {e}")
+            
             if file_size > self.max_size:
                 self.cleanup_file(local_file_path)
                 return False, "❌ File terlalu besar (> 2 GB).", None
 
             filename = os.path.basename(local_file_path)
+            logger.info(f"Successfully downloaded from Google Drive: {filename} ({file_size} bytes)")
             return True, f"✅ File `{filename}` downloaded successfully.", local_file_path
 
         except httpx.RequestError as e:

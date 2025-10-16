@@ -300,14 +300,22 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             download_duration = time.monotonic() - download_start
 
             if not success:
+                logger.warning(f"Download failed for {url}: {status_text}")
                 await download_tracker.finish_task(context.bot, tracker, task.id, success=False)
                 return
 
             if local_file_path is None:
+                logger.error(f"Download returned success but no file path for {url}")
+                await download_tracker.finish_task(context.bot, tracker, task.id, success=False)
+                return
+
+            if not os.path.exists(local_file_path):
+                logger.error(f"Downloaded file does not exist: {local_file_path}")
                 await download_tracker.finish_task(context.bot, tracker, task.id, success=False)
                 return
 
             file_size = os.path.getsize(local_file_path)
+            logger.info(f"Starting upload for {local_file_path} ({file_size} bytes) to chat {chat_id}")
             base_f = open(local_file_path, 'rb')
             wrapped = UploadProgressReader(base_f, file_size)
             stop_event = asyncio.Event()
@@ -350,10 +358,12 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                     if topic_id:
                         send_kwargs["message_thread_id"] = topic_id
+                    logger.info(f"Uploading file to Telegram: {filename} ({file_size} bytes)")
                     await send_document_safe(
                         context.bot,
                         **send_kwargs,
                     )
+                    logger.info(f"Upload successful: {filename}")
                 except NetworkError as ne:
                     if "Request Entity Too Large" in str(ne):
                         logger.warning("Upload rejected with 413. Falling back to Telegram fetch-by-URL.")
@@ -369,7 +379,9 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             context.bot,
                             **fallback_kwargs,
                         )
+                        logger.info(f"Fallback upload successful: {filename}")
                     else:
+                        logger.error(f"Network error during upload: {ne}", exc_info=True)
                         raise
             finally:
                 stop_event.set()
