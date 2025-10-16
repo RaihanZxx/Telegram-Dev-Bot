@@ -54,4 +54,4 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 # Group Only Configuration
-GROUP_ONLY = True  # Bot hanya bekerja di group
+GROUP_ONLY = True  # Bot operates only in groups

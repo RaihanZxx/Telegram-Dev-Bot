@@ -267,7 +267,7 @@ class AIService:
                 
                 if not content or content.strip() == "":
                     logger.warning("Empty response from AI")
-                    return "Maaf, tidak ada response dari AI. Coba lagi."
+                    return "Sorry, the AI did not respond. Please try again."
                 
                 logger.info(f"Response length: {len(content)} characters")
                 return content.strip()

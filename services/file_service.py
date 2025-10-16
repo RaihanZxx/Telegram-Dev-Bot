@@ -454,7 +454,7 @@ class FileService:
                         first_bytes = f.read(512)
                         if b'<!DOCTYPE' in first_bytes or b'<html' in first_bytes.lower():
                             self.cleanup_file(local_file_path)
-                            return False, "❌ Google Drive: File tidak dapat diakses. Pastikan link sharing di-set ke 'Anyone with the link'.", None
+                        return False, "❌ Google Drive: File is not accessible. Ensure the sharing link is set to 'Anyone with the link'.", None
                 except Exception as e:
                     logger.error(f"Error validating downloaded file: {e}")
             

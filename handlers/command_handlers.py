@@ -191,8 +191,8 @@ async def clear_db_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         response = (
-            "✅ Folder sementara berhasil dibersihkan!\n"
-            f"🧹 Dibersihkan: {summary}"
+            "✅ Temporary folder cleaned successfully!\n"
+            f"🧹 Cleaned: {summary}"
         )
 
     await edit_text_safe(status_message, response)
@@ -221,7 +221,7 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply_text_safe(
             message,
             "❌ Please provide the file URL.\n"
-            "Contoh: <code>/mirror https://example.com/file.zip</code>",
+            "Example: <code>/mirror https://example.com/file.zip</code>",
             parse_mode="HTML"
         )
         return
@@ -242,7 +242,7 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = user.id if user else 0
     chat_id = chat.id
     if not download_tracker.can_start(chat_id, user_id):
-        await reply_text_safe(message, "❌ Batas unduhan bersamaan per pengguna adalah 2. Selesaikan tugas aktif terlebih dahulu.")
+        await reply_text_safe(message, "❌ Maximum concurrent downloads per user is 2. Finish active tasks first.")
         return
 
     # User/Group display strings
@@ -252,7 +252,7 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tracker = await download_tracker.ensure_tracker(chat_id, user_id, user_display, group_display)
     if tracker.message_id is None:
         # Create a unified status message for this user's tasks in this group
-        banner = f"Task [{user_display}] Mirror.\nGroup [{group_display}]\nMenyiapkan tugas…"
+        banner = f"Task [{user_display}] Mirror.\nGroup [{group_display}]\nPreparing task…"
         banner_msg = await reply_text_safe(message, banner)
         await download_tracker.set_message_id(tracker, banner_msg.message_id)
 
@@ -447,7 +447,7 @@ async def cancel_dl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tracker = await download_tracker.ensure_tracker(chat_id, user_id, user_display, group_display)
     active = [t for t in tracker.tasks.values() if t.stage not in ("done", "error")]
     if not active:
-        await reply_text_safe(message, "ℹ️ Tidak ada tugas unduhan aktif untuk dibatalkan.")
+        await reply_text_safe(message, "ℹ️ No active download tasks to cancel.")
         # Delete the command message to keep chat clean
         try:
             await delete_message_safe(message)
@@ -456,7 +456,7 @@ async def cancel_dl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await download_tracker.cancel_all(context.bot, tracker)
-    await reply_text_safe(message, "🛑 Tugas unduhan Anda telah dibatalkan.")
+    await reply_text_safe(message, "🛑 Your download tasks have been cancelled.")
     # Delete the command message to keep chat clean
     try:
         await delete_message_safe(message)
@@ -510,7 +510,7 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     group_display = chat.title or str(chat_id)
     tracker = await music_tracker.ensure_tracker(chat_id, user_id, user_display, group_display)
     if tracker.message_id is None:
-        banner = f"🎵 <b>Task</b> [{user_display}] <b>Music</b>\n👥 <b>Group</b> [{group_display}]\nMenyiapkan tugas…"
+        banner = f"🎵 <b>Task</b> [{user_display}] <b>Music</b>\n👥 <b>Group</b> [{group_display}]\nPreparing task…"
         banner_msg = await reply_text_safe(message, banner, parse_mode="HTML")
         await music_tracker.set_message_id(tracker, banner_msg.message_id)
 
@@ -655,12 +655,12 @@ async def image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not prompt:
         await reply_text_safe(
             "❌ Please provide a description of the image.\n"
-            "Example: <code>/image kucing astronot</code>",
+            "Example: <code>/image astronaut cat</code>",
             parse_mode="HTML",
         )
         return
 
-    status_message = await reply_text_safe(message, "🎨 Produces images...")
+    status_message = await reply_text_safe(message, "🎨 Generating images...")
 
     try:
         image_buffer = await image_service.generate_image(prompt)
