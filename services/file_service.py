@@ -233,7 +233,7 @@ class FileService:
                         dl_url = f"https://drive.google.com/uc?export=download&confirm={token}&id={file_id}"
                     else:
                         # Try to find a direct docs.googleusercontent.com link
-                        m = re.search(r"https://[^"]+?googleusercontent.com/[^"]+", text)
+                        m = re.search(r'https://[^\"]+?googleusercontent.com/[^\"]+', text)
                         if m:
                             dl_url = m.group(0)
 
