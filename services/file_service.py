@@ -227,8 +227,8 @@ class FileService:
                 else:
                     # Parse confirm token from HTML (large file / virus scan warning)
                     text = resp.text
-                    logger.debug(f"Google Drive HTML response (first 500 chars): {text[:500]}")
-                    logger.debug(f"Content-Type: {content_type}, Content-Disposition: {cd}")
+                    logger.info(f"Google Drive initial HTML response (first 800 chars): {text[:800]}")
+                    logger.info(f"Content-Type: {content_type}, Content-Disposition: {cd}")
                     def _extract_html_filename(html: str) -> Optional[str]:
                         # og:title
                         m = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
@@ -285,19 +285,31 @@ class FileService:
                         dl_url = f"https://drive.google.com/uc?export=download&confirm={token}&id={file_id}"
                         logger.info(f"Found token: {token}, using confirmed URL")
                     else:
-                        # Try multiple patterns to find download link
+                        # Try multiple patterns to find download link - capture full URLs with query params
                         patterns = [
-                            r'https://[^\"\']+?googleusercontent\.com/[^\"\']+',
-                            r'href=["\']([^"\']*download[^"\']*)["\']',
-                            r'action=["\']([^"\']*export=download[^"\']*)["\']',
+                            # JSON-style download URL
                             r'"downloadUrl":\s*"([^"]+)"',
+                            # Form action or href with full URL
+                            r'href=["\']([^"\']+?usercontent\.google\.com/[^"\']+?)["\']',
+                            r'href=["\']([^"\']+?googleusercontent\.com/[^"\']+?)["\']',
+                            r'action=["\']([^"\']+?export=download[^"\']+?)["\']',
+                            # Direct URL match with query params
+                            r'(https://[^\s"\'<>]+?usercontent\.google\.com/[^\s"\'<>]+)',
+                            r'(https://[^\s"\'<>]+?googleusercontent\.com/[^\s"\'<>]+)',
                         ]
                         for pattern in patterns:
                             m = re.search(pattern, text, re.IGNORECASE)
                             if m:
-                                dl_url = m.group(1) if '(' in pattern else m.group(0)
-                                logger.info(f"Found download URL with pattern {pattern}: {dl_url[:100]}")
-                                break
+                                dl_url = m.group(1)
+                                # Decode HTML entities
+                                dl_url = dl_url.replace('&amp;', '&')
+                                logger.info(f"Found download URL with pattern: {dl_url}")
+                                # Validate it looks complete
+                                if 'id=' in dl_url or len(dl_url) > 100:
+                                    break
+                                else:
+                                    logger.warning(f"URL seems incomplete: {dl_url}")
+                                    dl_url = None
 
                     # If still no URL, try alternative direct download approach
                     if not dl_url and file_id:
@@ -310,36 +322,55 @@ class FileService:
                         return False, "❌ Failed to fetch file from Google Drive (token not found).", None
 
                     # Probe the confirmed URL to ensure it's a file, not HTML
-                    logger.info(f"Probing download URL: {dl_url[:150]}")
+                    logger.info(f"Probing download URL: {dl_url}")
                     probe = await client.get(dl_url)
                     probe.raise_for_status()
                     probe_ct = probe.headers.get("Content-Type", "")
                     probe_cd = probe.headers.get("Content-Disposition", "")
-                    logger.debug(f"Probe response - Content-Type: {probe_ct}, Content-Disposition: {probe_cd}")
+                    logger.info(f"Probe response - Content-Type: {probe_ct}, Content-Disposition: {probe_cd}")
                     
                     if probe_ct.startswith("text/html"):
                         # Try to extract the final googleusercontent link from the page
                         html2 = probe.text
-                        logger.debug(f"Probe returned HTML (first 500 chars): {html2[:500]}")
+                        logger.info(f"Probe returned HTML (first 1000 chars): {html2[:1000]}")
                         
-                        # Try multiple patterns
+                        # Try multiple patterns - ensure we capture full URL with query params
                         patterns2 = [
-                            r'href=\"(https://[^\"]+?usercontent\.google\.com/[^\"]+)\"',
-                            r'href=\"(https://[^\"]+?googleusercontent\.com/[^\"]+)\"',
-                            r'https://[^\"\'<>\s]+?usercontent\.google\.com/[^\"\'<>\s]+',
-                            r'https://[^\"\'<>\s]+?googleusercontent\.com/[^\"\'<>\s]+',
+                            # Match href with full URL including query params
+                            r'href=\"(https://[^\"]+?usercontent\.google\.com/[^\"]+?)\"',
+                            r'href=\"(https://[^\"]+?googleusercontent\.com/[^\"]+?)\"',
+                            r'href=\'(https://[^\']+?usercontent\.google\.com/[^\']+?)\'',
+                            r'href=\'(https://[^\']+?googleusercontent\.com/[^\']+?)\'',
+                            # Match URL without quotes - be more lenient with query params
+                            r'(https://\S+?usercontent\.google\.com/\S+)',
+                            r'(https://\S+?googleusercontent\.com/\S+)',
                         ]
                         for p2 in patterns2:
                             m2 = re.search(p2, html2, re.IGNORECASE)
                             if m2:
-                                dl_url = m2.group(1) if '(' in p2 else m2.group(0)
-                                logger.info(f"Extracted final download URL: {dl_url[:150]}")
-                                break
+                                dl_url = m2.group(1)
+                                # Decode HTML entities if present
+                                dl_url = dl_url.replace('&amp;', '&')
+                                # Remove trailing punctuation that might be captured
+                                dl_url = dl_url.rstrip('.,;:!?)\']}"')
+                                logger.info(f"Extracted final download URL: {dl_url}")
+                                # Validate URL has required parameters
+                                if 'id=' in dl_url or len(dl_url) > 100:  # Likely has params
+                                    break
+                                else:
+                                    logger.warning(f"URL seems incomplete, continuing search: {dl_url}")
+                                    dl_url = None
                         else:
                             logger.error(f"Could not extract final download URL from HTML")
                             return False, "❌ Google Drive blocked direct download (no confirm link).", None
+                    
+                    # Check if we got a valid URL after HTML parsing
+                    if not dl_url:
+                        logger.error("Download URL is None after HTML parsing")
+                        return False, "❌ Google Drive blocked direct download (no confirm link).", None
 
                     # Stream the final confirmed URL
+                    logger.info(f"Streaming from final URL: {dl_url}")
                     async with client.stream("GET", dl_url) as stream:
                         stream.raise_for_status()
                         cd2 = stream.headers.get("Content-Disposition")
