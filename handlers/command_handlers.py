@@ -256,9 +256,9 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         banner_msg = await reply_text_safe(message, banner)
         await download_tracker.set_message_id(tracker, banner_msg.message_id)
 
-    # Prepare filename & register task before scheduling
-    filename = url.split('/')[-1].split('?')[0] or "file"
-    task_meta = download_tracker.start_task(tracker, filename)
+    # Prepare initial filename & register task before scheduling
+    temp_filename = url.split('/')[-1].split('?')[0] or "file"
+    task_meta = download_tracker.start_task(tracker, temp_filename)
     # Initial render in minimalist format
     try:
         await download_tracker.update_task(
@@ -312,6 +312,13 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             file_size = os.path.getsize(local_file_path)
+            # Get actual filename from downloaded file
+            filename = os.path.basename(local_file_path)
+            # Update task with real filename
+            try:
+                tracker.tasks[task_meta.id].filename = filename
+            except Exception:
+                pass
             base_f = open(local_file_path, 'rb')
             wrapped = UploadProgressReader(base_f, file_size)
             stop_event = asyncio.Event()

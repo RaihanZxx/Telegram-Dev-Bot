@@ -66,6 +66,11 @@ class FileService:
             if "drive.google.com" in url or "docs.googleusercontent.com" in url:
                 ok, msg, path = await self._download_from_google_drive(url, progress_callback)
                 return ok, msg, path
+            
+            # Special handling for Pixeldrain links
+            if "pixeldrain.com" in url:
+                ok, msg, path = await self._download_from_pixeldrain(url, progress_callback)
+                return ok, msg, path
 
             # Extract filename from URL
             filename = url.split('/')[-1].split('?')[0] or "downloaded_file"
@@ -473,6 +478,124 @@ class FileService:
             return False, "❌ Download failed: Google Drive not reachable.", None
         except Exception as e:
             logger.error(f"Unexpected error while downloading from Google Drive: {e}", exc_info=True)
+            if local_file_path:
+                self.cleanup_file(local_file_path)
+            return False, f"❌ There is an error: {str(e)}", None
+
+    async def _download_from_pixeldrain(
+        self,
+        url: str,
+        progress_callback: Optional[Callable[[int, Optional[int], float], Awaitable[None]]] = None,
+    ) -> Tuple[bool, str, Optional[str]]:
+        """Download a file from Pixeldrain.
+        
+        Supports formats like:
+        - https://pixeldrain.com/u/FILE_ID
+        - https://pixeldrain.com/api/file/FILE_ID
+        """
+        def _extract_pixeldrain_id(u: str) -> Optional[str]:
+            # Extract ID from various Pixeldrain URL formats
+            import re
+            patterns = [
+                r'pixeldrain\.com/u/([a-zA-Z0-9_-]+)',
+                r'pixeldrain\.com/api/file/([a-zA-Z0-9_-]+)',
+            ]
+            for pattern in patterns:
+                m = re.search(pattern, u)
+                if m:
+                    return m.group(1)
+            return None
+
+        file_id = _extract_pixeldrain_id(url)
+        if not file_id:
+            return False, "❌ Invalid Pixeldrain URL format.", None
+        
+        logger.info(f"Pixeldrain link detected: {url}")
+        
+        # Use Pixeldrain API for download
+        api_url = f"https://pixeldrain.com/api/file/{file_id}"
+        info_url = f"https://pixeldrain.com/api/file/{file_id}/info"
+        
+        local_file_path: Optional[str] = None
+        try:
+            async with httpx.AsyncClient(
+                follow_redirects=True,
+                timeout=self.timeout,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+                },
+            ) as client:
+                # First get file info to determine filename and size
+                try:
+                    info_resp = await client.get(info_url)
+                    info_resp.raise_for_status()
+                    file_info = info_resp.json()
+                    filename = file_info.get('name', f'pixeldrain_{file_id}')
+                    expected_size = file_info.get('size')
+                except Exception:
+                    # If info fails, use fallback filename
+                    filename = f'pixeldrain_{file_id}'
+                    expected_size = None
+                
+                local_file_path = os.path.join(self.temp_dir, filename)
+                
+                # Download the file
+                with open(local_file_path, 'wb') as f:
+                    async with client.stream('GET', api_url) as response:
+                        response.raise_for_status()
+                        
+                        total_header = response.headers.get("Content-Length")
+                        total_size = int(total_header) if total_header and total_header.isdigit() else expected_size
+                        downloaded = 0
+                        start_time = time.monotonic()
+                        last_update = start_time
+
+                        async for chunk in response.aiter_bytes():
+                            if not chunk:
+                                continue
+                            f.write(chunk)
+                            downloaded += len(chunk)
+
+                            # Throttle progress updates to ~1/sec
+                            if progress_callback:
+                                now = time.monotonic()
+                                if now - last_update >= 1.0:
+                                    elapsed = max(0.001, now - start_time)
+                                    speed = downloaded / elapsed
+                                    try:
+                                        await progress_callback(downloaded, total_size, speed)
+                                    except Exception:
+                                        pass
+                                    last_update = now
+
+                        # Final progress update at completion
+                        if progress_callback:
+                            now = time.monotonic()
+                            elapsed = max(0.001, now - start_time)
+                            speed = downloaded / elapsed
+                            try:
+                                await progress_callback(downloaded, total_size, speed)
+                            except Exception:
+                                pass
+                
+                # Check file size
+                file_size = os.path.getsize(local_file_path)
+                
+                if file_size > self.max_size:
+                    self.cleanup_file(local_file_path)
+                    return False, f"❌ File `{filename}` terlalu besar (> 2 GB).", None
+                
+                logger.info(f"Downloaded file from Pixeldrain: {filename} ({_format_size(file_size)})")
+                return True, f"✅ File `{filename}` downloaded successfully.", local_file_path
+                
+        except httpx.RequestError as e:
+            logger.error(f"Request error while downloading from Pixeldrain: {e}")
+            if local_file_path:
+                self.cleanup_file(local_file_path)
+            return False, "❌ Download failed: Pixeldrain server not reachable.", None
+        
+        except Exception as e:
+            logger.error(f"Unexpected error while downloading from Pixeldrain: {e}", exc_info=True)
             if local_file_path:
                 self.cleanup_file(local_file_path)
             return False, f"❌ There is an error: {str(e)}", None
