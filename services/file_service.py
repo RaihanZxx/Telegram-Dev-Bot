@@ -332,18 +332,29 @@ class FileService:
                     if probe_ct.startswith("text/html"):
                         # Try to extract the final googleusercontent link from the page
                         html2 = probe.text
-                        logger.info(f"Probe returned HTML (first 1000 chars): {html2[:1000]}")
+                        logger.info(f"Probe returned HTML (full length {len(html2)} chars): {html2[:2000]}")
+                        # Also log the part that likely contains the download form/link
+                        if 'form' in html2.lower():
+                            form_start = html2.lower().find('<form')
+                            if form_start >= 0:
+                                logger.info(f"Form section: {html2[form_start:form_start+800]}")
                         
                         # Try multiple patterns - ensure we capture full URL with query params
                         patterns2 = [
+                            # Form action with full URL
+                            r'<form[^>]+action=["\']([^"\']+usercontent\.google\.com/[^"\']+)["\']',
+                            r'<form[^>]+action=["\']([^"\']+googleusercontent\.com/[^"\']+)["\']',
                             # Match href with full URL including query params
-                            r'href=\"(https://[^\"]+?usercontent\.google\.com/[^\"]+?)\"',
-                            r'href=\"(https://[^\"]+?googleusercontent\.com/[^\"]+?)\"',
-                            r'href=\'(https://[^\']+?usercontent\.google\.com/[^\']+?)\'',
-                            r'href=\'(https://[^\']+?googleusercontent\.com/[^\']+?)\'',
+                            r'href=["\']([^"\']+usercontent\.google\.com/download[^"\']*)["\']',
+                            r'href=["\']([^"\']+googleusercontent\.com/download[^"\']*)["\']',
+                            # ID attribute for download link
+                            r'id=["\']uc-download-link["\'][^>]+href=["\']([^"\']+)["\']',
+                            # Generic patterns
+                            r'href=["\']([^"\']+usercontent\.google\.com/[^"\']+?)["\']',
+                            r'href=["\']([^"\']+googleusercontent\.com/[^"\']+?)["\']',
                             # Match URL without quotes - be more lenient with query params
-                            r'(https://\S+?usercontent\.google\.com/\S+)',
-                            r'(https://\S+?googleusercontent\.com/\S+)',
+                            r'(https://[^\s"\'<>]+usercontent\.google\.com/download[^\s"\'<>]*)',
+                            r'(https://[^\s"\'<>]+googleusercontent\.com/download[^\s"\'<>]*)',
                         ]
                         for p2 in patterns2:
                             m2 = re.search(p2, html2, re.IGNORECASE)
@@ -360,7 +371,17 @@ class FileService:
                                 else:
                                     logger.warning(f"URL seems incomplete, continuing search: {dl_url}")
                                     dl_url = None
-                        else:
+                        
+                        # If still no URL, try to extract UUID and build URL manually
+                        if not dl_url:
+                            # Look for UUID pattern in the HTML
+                            uuid_match = re.search(r'uuid=([a-f0-9-]{36})', html2, re.IGNORECASE)
+                            if uuid_match and file_id:
+                                uuid = uuid_match.group(1)
+                                dl_url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&authuser=0&confirm=t&uuid={uuid}"
+                                logger.info(f"Built URL from UUID: {dl_url}")
+                        
+                        if not dl_url:
                             logger.error(f"Could not extract final download URL from HTML")
                             return False, "❌ Google Drive blocked direct download (no confirm link).", None
                     
