@@ -15,6 +15,17 @@ from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
+
+def _format_size(n: int) -> str:
+    """Format bytes to human readable size"""
+    from math import log2
+    units = ["B", "KB", "MB", "GB", "TB"]
+    if n <= 0:
+        return "0 B"
+    idx = min(int(log2(n) / 10), len(units) - 1)
+    return f"{n / (1 << (10 * idx)):.2f} {units[idx]}"
+
+
 class FileService:
     """Service for file operations"""
     
@@ -150,11 +161,10 @@ class FileService:
             return None
 
         file_id = _extract_id(url)
-        logger.info(f"Google Drive download - extracted file ID: {file_id} from URL: {url}")
+        logger.info(f"Google Drive link detected: {url}")
         initial_url = url
         if file_id:
             initial_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-            logger.info(f"Using initial URL: {initial_url}")
 
         local_file_path: Optional[str] = None
         try:
@@ -227,8 +237,6 @@ class FileService:
                 else:
                     # Parse confirm token from HTML (large file / virus scan warning)
                     text = resp.text
-                    logger.info(f"Google Drive initial HTML response (first 800 chars): {text[:800]}")
-                    logger.info(f"Content-Type: {content_type}, Content-Disposition: {cd}")
                     def _extract_html_filename(html: str) -> Optional[str]:
                         # og:title
                         m = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
@@ -283,7 +291,6 @@ class FileService:
                     dl_url = None
                     if token and file_id:
                         dl_url = f"https://drive.google.com/uc?export=download&confirm={token}&id={file_id}"
-                        logger.info(f"Found token: {token}, using confirmed URL")
                     else:
                         # Try multiple patterns to find download link - capture full URLs with query params
                         patterns = [
@@ -303,41 +310,29 @@ class FileService:
                                 dl_url = m.group(1)
                                 # Decode HTML entities
                                 dl_url = dl_url.replace('&amp;', '&')
-                                logger.info(f"Found download URL with pattern: {dl_url}")
                                 # Validate it looks complete
                                 if 'id=' in dl_url or len(dl_url) > 100:
                                     break
                                 else:
-                                    logger.warning(f"URL seems incomplete: {dl_url}")
                                     dl_url = None
 
                     # If still no URL, try alternative direct download approach
                     if not dl_url and file_id:
                         # Try Google Drive API-style download
                         dl_url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&authuser=0&confirm=t"
-                        logger.info(f"Trying alternative Google Drive API URL")
 
                     if not dl_url:
-                        logger.error(f"Could not extract download URL. HTML snippet: {text[:1000]}")
                         return False, "❌ Failed to fetch file from Google Drive (token not found).", None
 
                     # Probe the confirmed URL to ensure it's a file, not HTML
-                    logger.info(f"Probing download URL: {dl_url}")
                     probe = await client.get(dl_url)
                     probe.raise_for_status()
                     probe_ct = probe.headers.get("Content-Type", "")
                     probe_cd = probe.headers.get("Content-Disposition", "")
-                    logger.info(f"Probe response - Content-Type: {probe_ct}, Content-Disposition: {probe_cd}")
                     
                     if probe_ct.startswith("text/html"):
                         # Try to extract the final googleusercontent link from the page
                         html2 = probe.text
-                        logger.info(f"Probe returned HTML (full length {len(html2)} chars): {html2[:2000]}")
-                        # Also log the part that likely contains the download form/link
-                        if 'form' in html2.lower():
-                            form_start = html2.lower().find('<form')
-                            if form_start >= 0:
-                                logger.info(f"Form section: {html2[form_start:form_start+800]}")
                         
                         # Try multiple patterns - ensure we capture full URL with query params
                         patterns2 = [
@@ -369,7 +364,6 @@ class FileService:
                                 if 'id=' in dl_url or len(dl_url) > 100:  # Likely has params
                                     break
                                 else:
-                                    logger.warning(f"URL seems incomplete, continuing search: {dl_url}")
                                     dl_url = None
                         
                         # If still no URL, parse form and build URL from hidden inputs
@@ -379,7 +373,6 @@ class FileService:
                             if form_match:
                                 form_action = form_match.group(1)
                                 form_body = form_match.group(2)
-                                logger.info(f"Found form action: {form_action}")
                                 
                                 # Extract all hidden input fields
                                 params = {}
@@ -395,7 +388,6 @@ class FileService:
                                     query_parts = [f"{k}={v}" for k, v in params.items()]
                                     query_string = "&".join(query_parts)
                                     dl_url = f"{form_action}?{query_string}"
-                                    logger.info(f"Built URL from form inputs: {dl_url}")
                             
                             # Fallback: try to extract UUID and build URL manually
                             if not dl_url:
@@ -403,19 +395,15 @@ class FileService:
                                 if uuid_match and file_id:
                                     uuid = uuid_match.group(1)
                                     dl_url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&authuser=0&confirm=t&uuid={uuid}"
-                                    logger.info(f"Built URL from UUID: {dl_url}")
                         
                         if not dl_url:
-                            logger.error(f"Could not extract final download URL from HTML")
                             return False, "❌ Google Drive blocked direct download (no confirm link).", None
                     
                     # Check if we got a valid URL after HTML parsing
                     if not dl_url:
-                        logger.error("Download URL is None after HTML parsing")
                         return False, "❌ Google Drive blocked direct download (no confirm link).", None
 
                     # Stream the final confirmed URL
-                    logger.info(f"Streaming from final URL: {dl_url}")
                     async with client.stream("GET", dl_url) as stream:
                         stream.raise_for_status()
                         cd2 = stream.headers.get("Content-Disposition")
@@ -458,7 +446,6 @@ class FileService:
                 return False, "❌ Failed to download from Google Drive.", None
 
             file_size = os.path.getsize(local_file_path)
-            logger.info(f"Downloaded file size: {file_size} bytes from Google Drive")
             
             # Validate that we didn't download an HTML error page
             if file_size < 1024:  # Files smaller than 1KB are suspicious
@@ -466,7 +453,6 @@ class FileService:
                     with open(local_file_path, 'rb') as f:
                         first_bytes = f.read(512)
                         if b'<!DOCTYPE' in first_bytes or b'<html' in first_bytes.lower():
-                            logger.error(f"Downloaded file appears to be HTML error page: {first_bytes[:200]}")
                             self.cleanup_file(local_file_path)
                             return False, "❌ Google Drive: File tidak dapat diakses. Pastikan link sharing di-set ke 'Anyone with the link'.", None
                 except Exception as e:
@@ -477,7 +463,7 @@ class FileService:
                 return False, "❌ File terlalu besar (> 2 GB).", None
 
             filename = os.path.basename(local_file_path)
-            logger.info(f"Successfully downloaded from Google Drive: {filename} ({file_size} bytes)")
+            logger.info(f"Downloaded file from Google Drive: {filename} ({_format_size(file_size)})")
             return True, f"✅ File `{filename}` downloaded successfully.", local_file_path
 
         except httpx.RequestError as e:
