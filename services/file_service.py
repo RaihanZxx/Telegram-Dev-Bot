@@ -372,14 +372,38 @@ class FileService:
                                     logger.warning(f"URL seems incomplete, continuing search: {dl_url}")
                                     dl_url = None
                         
-                        # If still no URL, try to extract UUID and build URL manually
+                        # If still no URL, parse form and build URL from hidden inputs
                         if not dl_url:
-                            # Look for UUID pattern in the HTML
-                            uuid_match = re.search(r'uuid=([a-f0-9-]{36})', html2, re.IGNORECASE)
-                            if uuid_match and file_id:
-                                uuid = uuid_match.group(1)
-                                dl_url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&authuser=0&confirm=t&uuid={uuid}"
-                                logger.info(f"Built URL from UUID: {dl_url}")
+                            # Extract form action and build URL from hidden input fields
+                            form_match = re.search(r'<form[^>]+action=["\']([^"\']+)["\'][^>]*>(.*?)</form>', html2, re.IGNORECASE | re.DOTALL)
+                            if form_match:
+                                form_action = form_match.group(1)
+                                form_body = form_match.group(2)
+                                logger.info(f"Found form action: {form_action}")
+                                
+                                # Extract all hidden input fields
+                                params = {}
+                                for input_match in re.finditer(r'<input[^>]+name=["\']([^"\']+)["\'][^>]+value=["\']([^"\']+)["\']', form_body, re.IGNORECASE):
+                                    params[input_match.group(1)] = input_match.group(2)
+                                
+                                # Also try reverse pattern (value before name)
+                                for input_match in re.finditer(r'<input[^>]+value=["\']([^"\']+)["\'][^>]+name=["\']([^"\']+)["\']', form_body, re.IGNORECASE):
+                                    params[input_match.group(2)] = input_match.group(1)
+                                
+                                if params:
+                                    # Build query string
+                                    query_parts = [f"{k}={v}" for k, v in params.items()]
+                                    query_string = "&".join(query_parts)
+                                    dl_url = f"{form_action}?{query_string}"
+                                    logger.info(f"Built URL from form inputs: {dl_url}")
+                            
+                            # Fallback: try to extract UUID and build URL manually
+                            if not dl_url:
+                                uuid_match = re.search(r'uuid["\']?\s*[:=]\s*["\']?([a-f0-9-]{36})["\']?', html2, re.IGNORECASE)
+                                if uuid_match and file_id:
+                                    uuid = uuid_match.group(1)
+                                    dl_url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&authuser=0&confirm=t&uuid={uuid}"
+                                    logger.info(f"Built URL from UUID: {dl_url}")
                         
                         if not dl_url:
                             logger.error(f"Could not extract final download URL from HTML")
