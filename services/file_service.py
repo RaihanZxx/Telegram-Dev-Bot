@@ -250,7 +250,15 @@ class FileService:
                     if candidate_name:
                         candidate_name = _sanitize_filename(candidate_name)
                     token = None
-                    m = re.search(r"confirm=([0-9A-Za-z_]+)", text)
+                    # Try cookie-based token like gdown
+                    try:
+                        for k, v in resp.cookies.items():
+                            if str(k).startswith("download_warning") and v:
+                                token = str(v)
+                                break
+                    except Exception:
+                        pass
+                    m = re.search(r"confirm=([0-9A-Za-z_-]+)", text)
                     if m:
                         token = m.group(1)
                     if not token:
@@ -272,11 +280,30 @@ class FileService:
                     if not dl_url:
                         return False, "❌ Failed to fetch file from Google Drive (token not found).", None
 
+                    # Probe the confirmed URL to ensure it's a file, not HTML
+                    probe = await client.get(dl_url)
+                    probe.raise_for_status()
+                    if probe.headers.get("Content-Type", "").startswith("text/html"):
+                        # Try to extract the final googleusercontent link from the page
+                        html2 = probe.text
+                        m2 = re.search(r'href=\"(https://[^\"]+?googleusercontent\.com/[^\"]+)\"', html2)
+                        if m2:
+                            dl_url = m2.group(1)
+                        else:
+                            m2 = re.search(r'https://[^\"]+?googleusercontent\.com/[^\"]+', html2)
+                            if m2:
+                                dl_url = m2.group(0)
+                            else:
+                                return False, "❌ Google Drive blocked direct download (no confirm link).", None
+
                     # Stream the final confirmed URL
                     async with client.stream("GET", dl_url) as stream:
                         stream.raise_for_status()
                         cd2 = stream.headers.get("Content-Disposition")
                         filename = _filename_from_disposition(cd2) or candidate_name or (file_id or "downloaded_file")
+                        # Avoid misleading HTML titles
+                        if filename.lower().startswith("google drive - virus"):
+                            filename = file_id or "downloaded_file"
                         local_file_path = os.path.join(self.temp_dir, filename)
                         total_header = stream.headers.get("Content-Length")
                         total_size = int(total_header) if total_header and total_header.isdigit() else None
