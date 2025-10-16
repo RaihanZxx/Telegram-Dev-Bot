@@ -156,7 +156,15 @@ class FileService:
 
         local_file_path: Optional[str] = None
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=self.timeout) as client:
+            async with httpx.AsyncClient(
+                follow_redirects=True,
+                timeout=self.timeout,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+                    "Referer": "https://drive.google.com",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
+            ) as client:
                 # First request to get headers or confirm token page
                 resp = await client.get(initial_url)
                 resp.raise_for_status()
