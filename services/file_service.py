@@ -227,6 +227,8 @@ class FileService:
                 else:
                     # Parse confirm token from HTML (large file / virus scan warning)
                     text = resp.text
+                    logger.debug(f"Google Drive HTML response (first 500 chars): {text[:500]}")
+                    logger.debug(f"Content-Type: {content_type}, Content-Disposition: {cd}")
                     def _extract_html_filename(html: str) -> Optional[str]:
                         # og:title
                         m = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
@@ -281,30 +283,61 @@ class FileService:
                     dl_url = None
                     if token and file_id:
                         dl_url = f"https://drive.google.com/uc?export=download&confirm={token}&id={file_id}"
+                        logger.info(f"Found token: {token}, using confirmed URL")
                     else:
-                        # Try to find a direct docs.googleusercontent.com link
-                        m = re.search(r'https://[^\"]+?googleusercontent.com/[^\"]+', text)
-                        if m:
-                            dl_url = m.group(0)
+                        # Try multiple patterns to find download link
+                        patterns = [
+                            r'https://[^\"\']+?googleusercontent\.com/[^\"\']+',
+                            r'href=["\']([^"\']*download[^"\']*)["\']',
+                            r'action=["\']([^"\']*export=download[^"\']*)["\']',
+                            r'"downloadUrl":\s*"([^"]+)"',
+                        ]
+                        for pattern in patterns:
+                            m = re.search(pattern, text, re.IGNORECASE)
+                            if m:
+                                dl_url = m.group(1) if '(' in pattern else m.group(0)
+                                logger.info(f"Found download URL with pattern {pattern}: {dl_url[:100]}")
+                                break
+
+                    # If still no URL, try alternative direct download approach
+                    if not dl_url and file_id:
+                        # Try Google Drive API-style download
+                        dl_url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&authuser=0&confirm=t"
+                        logger.info(f"Trying alternative Google Drive API URL")
 
                     if not dl_url:
+                        logger.error(f"Could not extract download URL. HTML snippet: {text[:1000]}")
                         return False, "❌ Failed to fetch file from Google Drive (token not found).", None
 
                     # Probe the confirmed URL to ensure it's a file, not HTML
+                    logger.info(f"Probing download URL: {dl_url[:150]}")
                     probe = await client.get(dl_url)
                     probe.raise_for_status()
-                    if probe.headers.get("Content-Type", "").startswith("text/html"):
+                    probe_ct = probe.headers.get("Content-Type", "")
+                    probe_cd = probe.headers.get("Content-Disposition", "")
+                    logger.debug(f"Probe response - Content-Type: {probe_ct}, Content-Disposition: {probe_cd}")
+                    
+                    if probe_ct.startswith("text/html"):
                         # Try to extract the final googleusercontent link from the page
                         html2 = probe.text
-                        m2 = re.search(r'href=\"(https://[^\"]+?googleusercontent\.com/[^\"]+)\"', html2)
-                        if m2:
-                            dl_url = m2.group(1)
-                        else:
-                            m2 = re.search(r'https://[^\"]+?googleusercontent\.com/[^\"]+', html2)
+                        logger.debug(f"Probe returned HTML (first 500 chars): {html2[:500]}")
+                        
+                        # Try multiple patterns
+                        patterns2 = [
+                            r'href=\"(https://[^\"]+?usercontent\.google\.com/[^\"]+)\"',
+                            r'href=\"(https://[^\"]+?googleusercontent\.com/[^\"]+)\"',
+                            r'https://[^\"\'<>\s]+?usercontent\.google\.com/[^\"\'<>\s]+',
+                            r'https://[^\"\'<>\s]+?googleusercontent\.com/[^\"\'<>\s]+',
+                        ]
+                        for p2 in patterns2:
+                            m2 = re.search(p2, html2, re.IGNORECASE)
                             if m2:
-                                dl_url = m2.group(0)
-                            else:
-                                return False, "❌ Google Drive blocked direct download (no confirm link).", None
+                                dl_url = m2.group(1) if '(' in p2 else m2.group(0)
+                                logger.info(f"Extracted final download URL: {dl_url[:150]}")
+                                break
+                        else:
+                            logger.error(f"Could not extract final download URL from HTML")
+                            return False, "❌ Google Drive blocked direct download (no confirm link).", None
 
                     # Stream the final confirmed URL
                     async with client.stream("GET", dl_url) as stream:
