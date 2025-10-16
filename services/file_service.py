@@ -486,6 +486,7 @@ class FileService:
         self,
         url: str,
         progress_callback: Optional[Callable[[int, Optional[int], float], Awaitable[None]]] = None,
+        filename_callback: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> Tuple[bool, str, Optional[str]]:
         """Download a file from Pixeldrain.
         
@@ -532,6 +533,14 @@ class FileService:
                     file_info = info_resp.json()
                     filename = file_info.get('name', f'pixeldrain_{file_id}')
                     expected_size = file_info.get('size')
+                    
+                    # Notify caller about real filename for banner update
+                    if filename_callback:
+                        try:
+                            await filename_callback(filename)
+                        except Exception:
+                            pass
+                            
                 except Exception:
                     # If info fails, use fallback filename
                     filename = f'pixeldrain_{file_id}'

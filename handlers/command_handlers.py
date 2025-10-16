@@ -295,8 +295,23 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception:
                     pass
 
+            # Callback to update filename in banner when real filename is discovered
+            async def _on_filename_update(real_filename: str):
+                try:
+                    tracker.tasks[task.id].filename = real_filename
+                except Exception:
+                    pass
+
             download_start = time.monotonic()
-            success, status_text, local_file_path = await file_service.download_file(url, progress_callback=_on_progress)
+            
+            # Special handling for different platforms with filename callback
+            if "pixeldrain.com" in url:
+                success, status_text, local_file_path = await file_service._download_from_pixeldrain(
+                    url, progress_callback=_on_progress, filename_callback=_on_filename_update
+                )
+            else:
+                success, status_text, local_file_path = await file_service.download_file(url, progress_callback=_on_progress)
+            
             download_duration = time.monotonic() - download_start
 
             if not success:
