@@ -217,6 +217,38 @@ class FileService:
                 else:
                     # Parse confirm token from HTML (large file / virus scan warning)
                     text = resp.text
+                    def _extract_html_filename(html: str) -> Optional[str]:
+                        # og:title
+                        m = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
+                        if m:
+                            return m.group(1)
+                        # uc-name-size title attr
+                        m = re.search(r'class=["\']uc-name-size["\'][^>]*title=["\']([^"\']+)["\']', html, re.IGNORECASE)
+                        if m:
+                            return m.group(1)
+                        # data-title attr
+                        m = re.search(r'data-title=["\']([^"\']+)["\']', html, re.IGNORECASE)
+                        if m:
+                            return m.group(1)
+                        # <title>
+                        m = re.search(r'<title>([^<]+)</title>', html, re.IGNORECASE)
+                        if m:
+                            title_text = m.group(1).strip()
+                            # e.g., "recovery.img - Google Drive"
+                            if ' - Google Drive' in title_text:
+                                return title_text.split(' - Google Drive', 1)[0].strip()
+                            return title_text
+                        return None
+
+                    def _sanitize_filename(name: str) -> str:
+                        name = os.path.basename(name).strip().replace('\u200b', '')
+                        name = name.replace('/', '_').replace('\\', '_').replace('\n', ' ').replace('\r', ' ')
+                        # prevent empty names
+                        return name or (file_id or 'downloaded_file')
+
+                    candidate_name = _extract_html_filename(text)
+                    if candidate_name:
+                        candidate_name = _sanitize_filename(candidate_name)
                     token = None
                     m = re.search(r"confirm=([0-9A-Za-z_]+)", text)
                     if m:
@@ -244,7 +276,7 @@ class FileService:
                     async with client.stream("GET", dl_url) as stream:
                         stream.raise_for_status()
                         cd2 = stream.headers.get("Content-Disposition")
-                        filename = _filename_from_disposition(cd2) or (file_id or "downloaded_file")
+                        filename = _filename_from_disposition(cd2) or candidate_name or (file_id or "downloaded_file")
                         local_file_path = os.path.join(self.temp_dir, filename)
                         total_header = stream.headers.get("Content-Length")
                         total_size = int(total_header) if total_header and total_header.isdigit() else None
