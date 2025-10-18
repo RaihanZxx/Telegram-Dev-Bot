@@ -5,7 +5,7 @@ import re
 import shutil
 import tempfile
 import time
-from typing import Any, Callable, Optional, Tuple, Dict, Awaitable
+from typing import Any, Callable, Optional, Tuple, Dict, Awaitable, Coroutine
 
 import httpx
 import yt_dlp
@@ -46,7 +46,7 @@ class FileService:
     async def download_file(
         self,
         url: str,
-        progress_callback: Optional[Callable[[int, Optional[int], float], Awaitable[None]]] = None,
+        progress_callback: Optional[Callable[[int, Optional[int], float], Coroutine[Any, Any, None]]] = None,
     ) -> Tuple[bool, str, Optional[str]]:
         """
         Download file from URL.
@@ -82,6 +82,15 @@ class FileService:
                 follow_redirects=True,
                 timeout=self.timeout
             ) as client:
+                # First, make a HEAD request to check file size before downloading
+                head_response = await client.head(url)
+                total_header = head_response.headers.get("Content-Length")
+                total_size = int(total_header) if total_header and total_header.isdigit() else None
+                
+                if total_size is not None and total_size > self.max_size:
+                    logger.info(f"File size {total_size} exceeds maximum allowed size {self.max_size}")
+                    return False, f"❌ File `{filename}` is too large (> 2 GB).", None
+                
                 # Download file
                 with open(local_file_path, 'wb') as f:
                     async with client.stream('GET', url) as response:
@@ -89,6 +98,12 @@ class FileService:
 
                         total_header = response.headers.get("Content-Length")
                         total_size = int(total_header) if total_header and total_header.isdigit() else None
+                        
+                        # Double check size after receiving response headers
+                        if total_size is not None and total_size > self.max_size:
+                            logger.info(f"File size {total_size} exceeds maximum allowed size {self.max_size}")
+                            return False, f"❌ File `{filename}` is too large (> 2 GB).", None
+
                         downloaded = 0
                         start_time = time.monotonic()
                         last_update = start_time
@@ -121,13 +136,13 @@ class FileService:
                             except Exception as cb_err:
                                 logger.debug("Progress callback error (ignored): %s", cb_err)
             
-            # Check file size
+            # Check file size as a final check
             file_size = os.path.getsize(local_file_path)
             logger.info(f"Downloaded {filename}: {file_size} bytes")
             
             if file_size > self.max_size:
                 self.cleanup_file(local_file_path)
-                return False, f"❌ File `{filename}` terlalu besar (> 2 GB).", None
+                return False, f"❌ File `{filename}` is too large (> 2 GB).", None
             
             return True, f"✅ File `{filename}` downloaded successfully.", local_file_path
             
@@ -146,7 +161,7 @@ class FileService:
     async def _download_from_google_drive(
         self,
         url: str,
-        progress_callback: Optional[Callable[[int, Optional[int], float], Awaitable[None]]] = None,
+        progress_callback: Optional[Callable[[int, Optional[int], float], Coroutine[Any, Any, None]]] = None,
     ) -> Tuple[bool, str, Optional[str]]:
         """Download a file from Google Drive shared links.
 
@@ -408,6 +423,15 @@ class FileService:
                     if not dl_url:
                         return False, "❌ Google Drive blocked direct download (no confirm link).", None
 
+                    # First, check file size before downloading
+                    size_check_response = await client.head(dl_url)
+                    total_header = size_check_response.headers.get("Content-Length")
+                    total_size = int(total_header) if total_header and total_header.isdigit() else None
+                    
+                    if total_size is not None and total_size > self.max_size:
+                        logger.info(f"File size {total_size} exceeds maximum allowed size {self.max_size}")
+                        return False, "❌ File is too large (> 2 GB).", None
+
                     # Stream the final confirmed URL
                     async with client.stream("GET", dl_url) as stream:
                         stream.raise_for_status()
@@ -419,6 +443,12 @@ class FileService:
                         local_file_path = os.path.join(self.temp_dir, filename)
                         total_header = stream.headers.get("Content-Length")
                         total_size = int(total_header) if total_header and total_header.isdigit() else None
+                        
+                        # Double check size after receiving response headers
+                        if total_size is not None and total_size > self.max_size:
+                            logger.info(f"File size {total_size} exceeds maximum allowed size {self.max_size}")
+                            return False, "❌ File is too large (> 2 GB).", None
+
                         downloaded = 0
                         start_time = time.monotonic()
                         last_update = start_time
@@ -465,7 +495,7 @@ class FileService:
             
             if file_size > self.max_size:
                 self.cleanup_file(local_file_path)
-                return False, "❌ File terlalu besar (> 2 GB).", None
+                return False, "❌ File is too large (> 2 GB).", None
 
             filename = os.path.basename(local_file_path)
             logger.info(f"Downloaded file from Google Drive: {filename} ({_format_size(file_size)})")
@@ -485,8 +515,8 @@ class FileService:
     async def _download_from_pixeldrain(
         self,
         url: str,
-        progress_callback: Optional[Callable[[int, Optional[int], float], Awaitable[None]]] = None,
-        filename_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+        progress_callback: Optional[Callable[[int, Optional[int], float], Coroutine[Any, Any, None]]] = None,
+        filename_callback: Optional[Callable[[str], Coroutine[Any, Any, None]]] = None,
     ) -> Tuple[bool, str, Optional[str]]:
         """Download a file from Pixeldrain.
         
@@ -548,6 +578,15 @@ class FileService:
                 
                 local_file_path = os.path.join(self.temp_dir, filename)
                 
+                # First, check file size before downloading
+                size_check_response = await client.head(api_url)
+                total_header = size_check_response.headers.get("Content-Length")
+                total_size = int(total_header) if total_header and total_header.isdigit() else expected_size
+                
+                if total_size is not None and total_size > self.max_size:
+                    logger.info(f"File size {total_size} exceeds maximum allowed size {self.max_size}")
+                    return False, f"❌ File `{filename}` is too large (> 2 GB).", None
+                
                 # Download the file
                 with open(local_file_path, 'wb') as f:
                     async with client.stream('GET', api_url) as response:
@@ -555,6 +594,12 @@ class FileService:
                         
                         total_header = response.headers.get("Content-Length")
                         total_size = int(total_header) if total_header and total_header.isdigit() else expected_size
+                        
+                        # Double check size after receiving response headers
+                        if total_size is not None and total_size > self.max_size:
+                            logger.info(f"File size {total_size} exceeds maximum allowed size {self.max_size}")
+                            return False, f"❌ File `{filename}` is too large (> 2 GB).", None
+
                         downloaded = 0
                         start_time = time.monotonic()
                         last_update = start_time
@@ -587,12 +632,12 @@ class FileService:
                             except Exception:
                                 pass
                 
-                # Check file size
+                # Check file size as a final check
                 file_size = os.path.getsize(local_file_path)
                 
                 if file_size > self.max_size:
                     self.cleanup_file(local_file_path)
-                    return False, f"❌ File `{filename}` terlalu besar (> 2 GB).", None
+                    return False, f"❌ File `{filename}` is too large (> 2 GB).", None
                 
                 logger.info(f"Downloaded file from Pixeldrain: {filename} ({_format_size(file_size)})")
                 return True, f"✅ File `{filename}` downloaded successfully.", local_file_path
@@ -612,7 +657,7 @@ class FileService:
     async def download_audio(
         self,
         url: str,
-        progress_callback: Optional[Callable[[int, Optional[int], Optional[float], Optional[float]], Awaitable[None]]] = None,
+        progress_callback: Optional[Callable[[int, Optional[int], Optional[float], Optional[float]], Coroutine[Any, Any, None]]] = None,
     ) -> Tuple[bool, str, Optional[str], Optional[Dict[str, Optional[str]]]]:
         """
         Download audio content using yt-dlp.
@@ -678,6 +723,7 @@ class FileService:
 
             # Prepare progress hook bridging from thread to asyncio loop
             if progress_callback is not None:
+                non_optional_callback = progress_callback
                 last_sent = {"t": 0.0}
 
                 def _hook(d: Dict[str, Any]):
@@ -695,7 +741,7 @@ class FileService:
                         if current_loop is not None:
                             try:
                                 asyncio.run_coroutine_threadsafe(
-                                    progress_callback(downloaded, total_int, float(speed) if speed else None, float(eta) if eta else None),
+                                    non_optional_callback(downloaded, total_int, float(speed) if speed else None, float(eta) if eta else None),
                                     current_loop,
                                 )
                             except Exception:
@@ -712,7 +758,7 @@ class FileService:
                         if current_loop is not None:
                             try:
                                 asyncio.run_coroutine_threadsafe(
-                                    progress_callback(downloaded, total_int, None, 0.0),
+                                    non_optional_callback(downloaded, total_int, None, 0.0),
                                     current_loop,
                                 )
                             except Exception:

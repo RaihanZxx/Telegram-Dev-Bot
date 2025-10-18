@@ -279,14 +279,12 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         upload_duration = None
         upload_start = None
         try:
-            task = type("T", (), {"id": task_id})
-
             async def _on_progress(downloaded: int, total: Optional[int], speed_bps: float):
                 try:
                     await download_tracker.update_task(
                         context.bot,
                         tracker,
-                        task.id,
+                        task_id,
                         stage="download",
                         downloaded=downloaded,
                         total=total,
@@ -298,9 +296,31 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Callback to update filename in banner when real filename is discovered
             async def _on_filename_update(real_filename: str):
                 try:
-                    tracker.tasks[task.id].filename = real_filename
+                    tracker.tasks[task_id].filename = real_filename
                 except Exception:
                     pass
+
+            # Check file size before starting download
+            # First try to get file size via HEAD request
+            import httpx
+            from config.settings import DOWNLOAD_TIMEOUT
+            try:
+                async with httpx.AsyncClient(
+                    follow_redirects=True,
+                    timeout=DOWNLOAD_TIMEOUT
+                ) as client:
+                    head_response = await client.head(url)
+                    total_header = head_response.headers.get("Content-Length")
+                    total_size = int(total_header) if total_header and total_header.isdigit() else None
+                    
+                    from config.settings import MAX_FILE_SIZE
+                    if total_size is not None and total_size > MAX_FILE_SIZE:
+                        await reply_text_safe(message, f"❌ File is too large (> 2 GB). Download cancelled.")
+                        await download_tracker.finish_task(context.bot, tracker, task_id, success=False)
+                        return
+            except Exception as e:
+                logger.warning(f"Could not check file size before download: {e}")
+                # Continue with download if we can't check size
 
             download_start = time.monotonic()
             
@@ -315,15 +335,15 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             download_duration = time.monotonic() - download_start
 
             if not success:
-                await download_tracker.finish_task(context.bot, tracker, task.id, success=False)
+                await download_tracker.finish_task(context.bot, tracker, task_id, success=False)
                 return
 
             if local_file_path is None:
-                await download_tracker.finish_task(context.bot, tracker, task.id, success=False)
+                await download_tracker.finish_task(context.bot, tracker, task_id, success=False)
                 return
 
             if not os.path.exists(local_file_path):
-                await download_tracker.finish_task(context.bot, tracker, task.id, success=False)
+                await download_tracker.finish_task(context.bot, tracker, task_id, success=False)
                 return
 
             file_size = os.path.getsize(local_file_path)
@@ -353,7 +373,7 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await download_tracker.update_task(
                                 context.bot,
                                 tracker,
-                                task.id,
+                                task_id,
                                 stage="upload",
                                 downloaded=read,
                                 total=file_size,
@@ -368,34 +388,34 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             updater_task = asyncio.create_task(_upload_progress_updater())
             try:
                 try:
-                    send_kwargs = dict(
-                        chat_id=chat_id,
-                        document=wrapped,
-                        read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                        write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                    )
+                    send_kwargs = {
+                        "read_timeout": TELEGRAM_UPLOAD_TIMEOUT,
+                        "write_timeout": TELEGRAM_UPLOAD_TIMEOUT,
+                    }
                     if topic_id:
                         send_kwargs["message_thread_id"] = topic_id
                         logger.info(f"Uploading file: {filename} ({_format_size(file_size)}) to group {chat_id}, topic {topic_id}")
                     else:
                         logger.info(f"Uploading file: {filename} ({_format_size(file_size)}) to group {chat_id}")
                     await send_document_safe(
-                        context.bot,
+                        bot=context.bot,
+                        chat_id=chat_id,
+                        document=wrapped,
                         **send_kwargs,
                     )
                 except NetworkError as ne:
                     if "Request Entity Too Large" in str(ne):
                         logger.warning("Upload rejected with 413. Falling back to Telegram fetch-by-URL.")
-                        fallback_kwargs = dict(
-                            chat_id=chat_id,
-                            document=url,
-                            read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                            write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                        )
+                        fallback_kwargs = {
+                            "read_timeout": TELEGRAM_UPLOAD_TIMEOUT,
+                            "write_timeout": TELEGRAM_UPLOAD_TIMEOUT,
+                        }
                         if topic_id:
                             fallback_kwargs["message_thread_id"] = topic_id
                         await send_document_safe(
-                            context.bot,
+                            bot=context.bot,
+                            chat_id=chat_id,
+                            document=url,
                             **fallback_kwargs,
                         )
                     else:
@@ -412,7 +432,7 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
             upload_duration = time.monotonic() - upload_start
 
-            await download_tracker.finish_task(context.bot, tracker, task.id, success=True)
+            await download_tracker.finish_task(context.bot, tracker, task_id, success=True)
 
         except asyncio.CancelledError:
             # user-triggered cancellation
@@ -425,17 +445,17 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Upload timed out for mirror command: {e}", exc_info=True)
             if upload_start is not None:
                 upload_duration = time.monotonic() - upload_start
-            await download_tracker.finish_task(context.bot, tracker, task.id, success=False)
+            await download_tracker.finish_task(context.bot, tracker, task_id, success=False)
             return
         except asyncio.TimeoutError as e:
             logger.error(f"Async operation timed out for mirror command: {e}", exc_info=True)
             if upload_start is not None:
                 upload_duration = time.monotonic() - upload_start
-            await download_tracker.finish_task(context.bot, tracker, task.id, success=False)
+            await download_tracker.finish_task(context.bot, tracker, task_id, success=False)
             return
         except Exception as e:
             logger.error(f"Error in mirror command: {e}", exc_info=True)
-            await download_tracker.finish_task(context.bot, tracker, task.id, success=False)
+            await download_tracker.finish_task(context.bot, tracker, task_id, success=False)
         finally:
             if local_file_path:
                 file_service.cleanup_file(local_file_path)
@@ -500,6 +520,7 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not context.args:
         await reply_text_safe(
+            message,
             "❌ Please provide the music URL.\n"
             "Example: <code>/music https://music.youtube.com/watch?v=hsfa1RSk0pA</code>",
             parse_mode="HTML"
@@ -563,6 +584,8 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception:
                     pass
 
+            # For music, we can't easily check file size before downloading with yt-dlp,
+            # but the file_service.download_audio already has size checks
             success, info_message, local_file_path, metadata = await file_service.download_audio(url, progress_callback=_on_progress)
             if not success or not local_file_path:
                 await music_tracker.finish_task(context.bot, tracker, task_meta.id, success=False)
@@ -614,18 +637,18 @@ async def music_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             upload_start = time.monotonic()
             updater_task = asyncio.create_task(_upload_progress_updater_audio())
             try:
-                send_kwargs = dict(
+                send_audio_kwargs = {
+                    "read_timeout": TELEGRAM_UPLOAD_TIMEOUT,
+                    "write_timeout": TELEGRAM_UPLOAD_TIMEOUT,
+                    **kwargs,
+                }
+                if topic_id:
+                    send_audio_kwargs["message_thread_id"] = topic_id
+                await send_audio_safe(
+                    bot=context.bot,
                     chat_id=chat.id,
                     audio=wrapped,
-                    read_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                    write_timeout=TELEGRAM_UPLOAD_TIMEOUT,
-                    **kwargs,
-                )
-                if topic_id:
-                    send_kwargs["message_thread_id"] = topic_id
-                await send_audio_safe(
-                    context.bot,
-                    **send_kwargs,
+                    **send_audio_kwargs,
                 )
             finally:
                 stop_event.set()
@@ -676,6 +699,7 @@ async def image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not prompt:
         await reply_text_safe(
+            message,
             "❌ Please provide a description of the image.\n"
             "Example: <code>/image astronaut cat</code>",
             parse_mode="HTML",

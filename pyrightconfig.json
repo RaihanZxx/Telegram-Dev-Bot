@@ -1,0 +1,19 @@
+{
+  "include": [
+    "*.py",
+    "config/**/*.py",
+    "handlers/**/*.py",
+    "middleware/**/*.py",
+    "services/**/*.py",
+    "utils/**/*.py"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    ".venv"
+  ],
+  "pythonVersion": "3.13.3",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "warning",
+  "reportPossiblyUnboundVariable": "error"
+}

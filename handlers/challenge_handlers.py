@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, Message
 from telegram.ext import ContextTypes
 
 from middleware.group_filter import group_only_filter
@@ -61,6 +61,10 @@ async def challenge_lang_callback(update: Update, context: ContextTypes.DEFAULT_
     if not q or not chat or not user:
         return
 
+    message = q.message
+    if not isinstance(message, Message):
+        return
+
     data = q.data or ""
     if not data.startswith("challenge_lang:"):
         return
@@ -74,9 +78,9 @@ async def challenge_lang_callback(update: Update, context: ContextTypes.DEFAULT_
     ]
     markup = InlineKeyboardMarkup(kb)
     try:
-        await edit_text_safe(q.message, f"Language selected: {lang}.\nChoose difficulty:", reply_markup=markup)
+        await edit_text_safe(message, f"Language selected: {lang}.\nChoose difficulty:", reply_markup=markup)
     except Exception:
-        await reply_text_safe(q.message, f"Language selected: {lang}.\nChoose difficulty:", reply_markup=markup)
+        await reply_text_safe(message, f"Language selected: {lang}.\nChoose difficulty:", reply_markup=markup)
     await q.answer()
 
 
@@ -86,6 +90,10 @@ async def challenge_diff_callback(update: Update, context: ContextTypes.DEFAULT_
     chat = update.effective_chat
     user = update.effective_user
     if not q or not chat or not user:
+        return
+
+    message = q.message
+    if not isinstance(message, Message):
         return
 
     data = q.data or ""
@@ -102,7 +110,7 @@ async def challenge_diff_callback(update: Update, context: ContextTypes.DEFAULT_
 
     # Acknowledge selection and generate challenge
     try:
-        await edit_text_safe(q.message, f"Language: {lang}\nDifficulty: {diff}\nGenerating challenge…")
+        await edit_text_safe(message, f"Language: {lang}\nDifficulty: {diff}\nGenerating challenge…")
     except Exception:
         pass
 
@@ -126,7 +134,7 @@ async def challenge_diff_callback(update: Update, context: ContextTypes.DEFAULT_
     challenge_text = f"{content}{tail}"
 
     formatted = format_telegram_markdown(challenge_text)
-    sent = await reply_text_safe(q.message, formatted, parse_mode="MarkdownV2")
+    sent = await reply_text_safe(message, formatted, parse_mode="MarkdownV2")
 
     challenge_manager.clear_selection(chat.id, user.id)
     challenge_manager.add_pending(
